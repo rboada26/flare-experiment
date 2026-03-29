@@ -1,0 +1,83 @@
+networks:
+  cnn_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  rnn_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
+
+services:
+
+  cnn_server:
+    build: ./server
+    container_name: fl_cnn_server
+    networks:
+      cnn_network:
+        ipv4_address: 172.20.0.10
+    ports:
+      - "8080:8080"
+
+  rnn_server:
+    build: ./server
+    container_name: fl_rnn_server
+    networks:
+      rnn_network:
+        ipv4_address: 172.21.0.10
+    ports:
+      - "8081:8080"
+
+  cnn_client:
+    build:
+      context: ./clients
+      dockerfile: cnn_client/Dockerfile
+    container_name: fl_cnn_client
+    networks:
+      cnn_network:
+        ipv4_address: 172.20.0.11
+    environment:
+      - FL_SERVER_ADDR=172.20.0.10
+    depends_on:
+      - cnn_server
+
+  cnn_client2:
+    build:
+      context: ./clients
+      dockerfile: cnn_client/Dockerfile
+    container_name: fl_cnn_client2
+    networks:
+      cnn_network:
+        ipv4_address: 172.20.0.12
+    environment:
+      - FL_SERVER_ADDR=172.20.0.10
+    depends_on:
+      - cnn_server
+
+  rnn_client:
+    build:
+      context: ./clients
+      dockerfile: rnn_client/Dockerfile
+    container_name: fl_rnn_client
+    networks:
+      rnn_network:
+        ipv4_address: 172.21.0.11
+    environment:
+      - FL_SERVER_ADDR=172.21.0.10
+    depends_on:
+      - rnn_server
+
+  rnn_client2:
+    build:
+      context: ./clients
+      dockerfile: rnn_client/Dockerfile
+    container_name: fl_rnn_client2
+    networks:
+      rnn_network:
+        ipv4_address: 172.21.0.12
+    environment:
+      - FL_SERVER_ADDR=172.21.0.10
+    depends_on:
+      - rnn_server

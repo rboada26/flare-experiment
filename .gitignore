@@ -1,0 +1,24 @@
+# Captured traffic - too large for git, regenerate with collect_data.sh
+captures/*.pcap
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Dataset files downloaded at build time
+clients/cnn_client/data/
+clients/rnn_client/data/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+venv/
+.env/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.zip
