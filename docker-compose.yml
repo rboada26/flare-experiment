@@ -1,83 +1,242 @@
 networks:
-  cnn_network:
+  simplecnn_network:
     driver: bridge
     ipam:
       config:
         - subnet: 172.20.0.0/24
-  rnn_network:
+  resnet_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+  mobilenet_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
+  gru_network:
     driver: bridge
     ipam:
       config:
         - subnet: 172.21.0.0/24
+  lstm_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.1.0/24
+  bilstm_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.2.0/24
 
 services:
-
-  cnn_server:
+  simplecnn_server:
     build: ./server
-    container_name: fl_cnn_server
+    container_name: fl_simplecnn_server
     networks:
-      cnn_network:
+      simplecnn_network:
         ipv4_address: 172.20.0.10
     ports:
       - "8080:8080"
 
-  rnn_server:
-    build: ./server
-    container_name: fl_rnn_server
-    networks:
-      rnn_network:
-        ipv4_address: 172.21.0.10
-    ports:
-      - "8081:8080"
-
-  cnn_client:
+  simplecnn_client:
     build:
       context: ./clients
       dockerfile: cnn_client/Dockerfile
-    container_name: fl_cnn_client
+    container_name: fl_simplecnn_client
     networks:
-      cnn_network:
+      simplecnn_network:
         ipv4_address: 172.20.0.11
     environment:
       - FL_SERVER_ADDR=172.20.0.10
     depends_on:
-      - cnn_server
+      - simplecnn_server
 
-  cnn_client2:
+  simplecnn_client2:
     build:
       context: ./clients
       dockerfile: cnn_client/Dockerfile
-    container_name: fl_cnn_client2
+    container_name: fl_simplecnn_client2
     networks:
-      cnn_network:
+      simplecnn_network:
         ipv4_address: 172.20.0.12
     environment:
       - FL_SERVER_ADDR=172.20.0.10
     depends_on:
-      - cnn_server
+      - simplecnn_server
 
-  rnn_client:
+  resnet_server:
+    build: ./server
+    container_name: fl_resnet_server
+    networks:
+      resnet_network:
+        ipv4_address: 172.20.1.10
+    ports:
+      - "8081:8080"
+
+  resnet_client:
+    build:
+      context: ./clients
+      dockerfile: resnet_client/Dockerfile
+    container_name: fl_resnet_client
+    networks:
+      resnet_network:
+        ipv4_address: 172.20.1.11
+    environment:
+      - FL_SERVER_ADDR=172.20.1.10
+    depends_on:
+      - resnet_server
+
+  resnet_client2:
+    build:
+      context: ./clients
+      dockerfile: resnet_client/Dockerfile
+    container_name: fl_resnet_client2
+    networks:
+      resnet_network:
+        ipv4_address: 172.20.1.12
+    environment:
+      - FL_SERVER_ADDR=172.20.1.10
+    depends_on:
+      - resnet_server
+
+  mobilenet_server:
+    build: ./server
+    container_name: fl_mobilenet_server
+    networks:
+      mobilenet_network:
+        ipv4_address: 172.20.2.10
+    ports:
+      - "8082:8080"
+
+  mobilenet_client:
+    build:
+      context: ./clients
+      dockerfile: mobilenet_client/Dockerfile
+    container_name: fl_mobilenet_client
+    networks:
+      mobilenet_network:
+        ipv4_address: 172.20.2.11
+    environment:
+      - FL_SERVER_ADDR=172.20.2.10
+    depends_on:
+      - mobilenet_server
+
+  mobilenet_client2:
+    build:
+      context: ./clients
+      dockerfile: mobilenet_client/Dockerfile
+    container_name: fl_mobilenet_client2
+    networks:
+      mobilenet_network:
+        ipv4_address: 172.20.2.12
+    environment:
+      - FL_SERVER_ADDR=172.20.2.10
+    depends_on:
+      - mobilenet_server
+
+  gru_server:
+    build: ./server
+    container_name: fl_gru_server
+    networks:
+      gru_network:
+        ipv4_address: 172.21.0.10
+    ports:
+      - "8083:8080"
+
+  gru_client:
     build:
       context: ./clients
       dockerfile: rnn_client/Dockerfile
-    container_name: fl_rnn_client
+    container_name: fl_gru_client
     networks:
-      rnn_network:
+      gru_network:
         ipv4_address: 172.21.0.11
     environment:
       - FL_SERVER_ADDR=172.21.0.10
     depends_on:
-      - rnn_server
+      - gru_server
 
-  rnn_client2:
+  gru_client2:
     build:
       context: ./clients
       dockerfile: rnn_client/Dockerfile
-    container_name: fl_rnn_client2
+    container_name: fl_gru_client2
     networks:
-      rnn_network:
+      gru_network:
         ipv4_address: 172.21.0.12
     environment:
       - FL_SERVER_ADDR=172.21.0.10
     depends_on:
-      - rnn_server
+      - gru_server
+
+  lstm_server:
+    build: ./server
+    container_name: fl_lstm_server
+    networks:
+      lstm_network:
+        ipv4_address: 172.21.1.10
+    ports:
+      - "8084:8080"
+
+  lstm_client:
+    build:
+      context: ./clients
+      dockerfile: lstm_client/Dockerfile
+    container_name: fl_lstm_client
+    networks:
+      lstm_network:
+        ipv4_address: 172.21.1.11
+    environment:
+      - FL_SERVER_ADDR=172.21.1.10
+    depends_on:
+      - lstm_server
+
+  lstm_client2:
+    build:
+      context: ./clients
+      dockerfile: lstm_client/Dockerfile
+    container_name: fl_lstm_client2
+    networks:
+      lstm_network:
+        ipv4_address: 172.21.1.12
+    environment:
+      - FL_SERVER_ADDR=172.21.1.10
+    depends_on:
+      - lstm_server
+
+  bilstm_server:
+    build: ./server
+    container_name: fl_bilstm_server
+    networks:
+      bilstm_network:
+        ipv4_address: 172.21.2.10
+    ports:
+      - "8085:8080"
+
+  bilstm_client:
+    build:
+      context: ./clients
+      dockerfile: bilstm_client/Dockerfile
+    container_name: fl_bilstm_client
+    networks:
+      bilstm_network:
+        ipv4_address: 172.21.2.11
+    environment:
+      - FL_SERVER_ADDR=172.21.2.10
+    depends_on:
+      - bilstm_server
+
+  bilstm_client2:
+    build:
+      context: ./clients
+      dockerfile: bilstm_client/Dockerfile
+    container_name: fl_bilstm_client2
+    networks:
+      bilstm_network:
+        ipv4_address: 172.21.2.12
+    environment:
+      - FL_SERVER_ADDR=172.21.2.10
+    depends_on:
+      - bilstm_server

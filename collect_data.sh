@@ -2,98 +2,83 @@
 set -euo pipefail
 
 NUM_SESSIONS=8
+ARCHITECTURES=(simplecnn resnet mobilenet gru lstm bilstm)
+SUBNETS=(172.20.0 172.20.1 172.20.2 172.21.0 172.21.1 172.21.2)
 
-wait_for_training() {
+wait_for_all_clients() {
     echo "Polling for training completion..."
     while true; do
-        # Check if all 4 client containers have exited
-        CNN1=$(docker inspect -f '{{.State.Status}}' fl_cnn_client  2>/dev/null || echo "gone")
-        CNN2=$(docker inspect -f '{{.State.Status}}' fl_cnn_client2 2>/dev/null || echo "gone")
-        RNN1=$(docker inspect -f '{{.State.Status}}' fl_rnn_client  2>/dev/null || echo "gone")
-        RNN2=$(docker inspect -f '{{.State.Status}}' fl_rnn_client2 2>/dev/null || echo "gone")
-
-        echo "  Status — cnn_client: $CNN1 | cnn_client2: $CNN2 | rnn_client: $RNN1 | rnn_client2: $RNN2"
-
-        if [[ "$CNN1" == "exited" && "$CNN2" == "exited" && \
-              "$RNN1" == "exited" && "$RNN2" == "exited" ]]; then
-            echo "All clients finished training."
-            break
-        fi
-
+        all_done=true
+        status_line=""
+        for arch in "${ARCHITECTURES[@]}"; do
+            s1=$(docker inspect -f '{{.State.Status}}' "fl_${arch}_client"  2>/dev/null || echo "gone")
+            s2=$(docker inspect -f '{{.State.Status}}' "fl_${arch}_client2" 2>/dev/null || echo "gone")
+            status_line+="${arch}:${s1}/${s2} "
+            if [[ "$s1" != "exited" || "$s2" != "exited" ]]; then
+                all_done=false
+            fi
+        done
+        echo "  $status_line"
+        $all_done && { echo "All clients finished."; break; }
         sleep 5
     done
 }
 
 for i in $(seq 1 $NUM_SESSIONS); do
-    LABEL="session${i}"
     echo ""
     echo "============================================"
     echo " Starting session $i / $NUM_SESSIONS"
     echo "============================================"
 
-    # Clean slate
     docker compose down --remove-orphans 2>/dev/null || true
     sleep 2
 
-    # Step 1: bring up networks and servers only
-    docker compose up -d cnn_server rnn_server
-    sleep 8
-
-    # Step 2: find bridge interfaces and start capture
-    CNN_ID=$(docker network inspect flare-experiment_cnn_network \
-        --format '{{.Id}}' 2>/dev/null | cut -c1-12)
-    RNN_ID=$(docker network inspect flare-experiment_rnn_network \
-        --format '{{.Id}}' 2>/dev/null | cut -c1-12)
-    CNN_IFACE="br-${CNN_ID}"
-    RNN_IFACE="br-${RNN_ID}"
+    docker compose up -d \
+      simplecnn_server resnet_server mobilenet_server \
+      gru_server lstm_server bilstm_server
+    sleep 10
 
     mkdir -p captures
-    CNN_PCAP="captures/${LABEL}_cnn_$(date +%Y%m%d_%H%M%S).pcap"
-    RNN_PCAP="captures/${LABEL}_rnn_$(date +%Y%m%d_%H%M%S).pcap"
-
-    CNN_FILTER="(src net 172.20.0.0/24 and dst net 172.20.0.0/24) and not multicast"
-    RNN_FILTER="(src net 172.21.0.0/24 and dst net 172.21.0.0/24) and not multicast"
-
-    sudo tcpdump -i "$CNN_IFACE" -w "$CNN_PCAP" -s0 "$CNN_FILTER" &
-    PID_CNN=$!
-    sudo tcpdump -i "$RNN_IFACE" -w "$RNN_PCAP" -s0 "$RNN_FILTER" &
-    PID_RNN=$!
+    PIDS=()
+    for idx in "${!ARCHITECTURES[@]}"; do
+        arch="${ARCHITECTURES[$idx]}"
+        subnet="${SUBNETS[$idx]}"
+        net_name="flare-experiment_${arch}_network"
+        net_id=$(docker network inspect "$net_name" --format '{{.Id}}' 2>/dev/null | cut -c1-12)
+        iface="br-${net_id}"
+        pcap="captures/session${i}_${arch}_$(date +%Y%m%d_%H%M%S).pcap"
+        filter="(src net ${subnet}.0/24 and dst net ${subnet}.0/24) and not multicast"
+        sudo tcpdump -i "$iface" -w "$pcap" -s0 "$filter" &
+        PIDS+=($!)
+        sleep 0.5
+    done
 
     sleep 2
 
-    # Step 3: start clients
-    docker compose up -d cnn_client cnn_client2 rnn_client rnn_client2
+    docker compose up -d \
+      simplecnn_client simplecnn_client2 \
+      resnet_client resnet_client2 \
+      mobilenet_client mobilenet_client2 \
+      gru_client gru_client2 \
+      lstm_client lstm_client2 \
+      bilstm_client bilstm_client2
 
-    echo "Capture PIDs: $PID_CNN (CNN) $PID_RNN (RNN)"
+    wait_for_all_clients
 
-    # Step 4: poll until all clients exit
-    wait_for_training
-
-    # Let last packets flush
     sleep 3
 
-    # Stop capture
-    sudo kill $PID_CNN 2>/dev/null || true
-    sudo kill $PID_RNN 2>/dev/null || true
-    wait $PID_CNN 2>/dev/null || true
-    wait $PID_RNN 2>/dev/null || true
+    for pid in "${PIDS[@]}"; do
+        sudo kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
 
-    # Tear down
     docker compose down --remove-orphans
     sleep 3
 
-    echo "Session $i done. Captures so far:"
-    ls -lh captures/*.pcap 2>/dev/null | awk '{print $5, $9}'
+    echo "Session $i done:"
+    ls -lh captures/session${i}_*.pcap 2>/dev/null | awk '{print $5, $9}'
 done
 
 echo ""
 echo "All sessions complete."
 ls -lh captures/
-```
-
-The key change is `wait_for_training()` which polls `docker inspect` every 5 seconds and prints the status of each container so you can see exactly what's happening. Run it and you should see output like:
-```
-Status — cnn_client: running | cnn_client2: running | rnn_client: running | rnn_client2: running
-Status — cnn_client: running | cnn_client2: running | rnn_client: exited | rnn_client2: exited
-Status — cnn_client: exited  | cnn_client2: exited  | rnn_client: exited  | rnn_client2: exited
-All clients finished training.
