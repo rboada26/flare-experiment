@@ -1,5 +1,6 @@
 import os
 import glob
+import argparse
 import numpy as np
 import pandas as pd
 from scapy.all import rdpcap, IP
@@ -9,6 +10,7 @@ PCAP_DIR    = "./captures"
 OUTPUT_CSV  = "./features.csv"
 WINDOW_SIZE = 30
 MIN_PACKETS = 50
+MIN_SIZE    = 0       # drop packets smaller than this (bytes); 66 matches paper
 SIZE_BINS   = 20
 
 # Label map — order matters for classifier interpretation
@@ -38,8 +40,10 @@ def load_pcap(path):
     for pkt in raw:
         if IP not in pkt:
             continue
+        size = len(pkt)
+        if size < MIN_SIZE:
+            continue
         ts        = float(pkt.time)
-        size      = len(pkt)
         direction = -1 if pkt[IP].src.endswith(".10") else 1
         packets.append((ts, size, direction))
     packets.sort(key=lambda x: x[0])
@@ -142,6 +146,26 @@ def process_pcap(path, label, arch):
     return rows
 
 def main():
+    global WINDOW_SIZE, MIN_PACKETS, MIN_SIZE
+
+    parser = argparse.ArgumentParser(description="Extract features from PCAP captures")
+    parser.add_argument("--window",      type=int, default=WINDOW_SIZE,
+                        help="Time window size in seconds (default: 30)")
+    parser.add_argument("--min-packets", type=int, default=MIN_PACKETS,
+                        help="Minimum packets per window (default: 50)")
+    parser.add_argument("--min-size",    type=int, default=MIN_SIZE,
+                        help="Drop packets smaller than this many bytes (default: 0 = keep all; paper uses 66)")
+    args = parser.parse_args()
+
+    WINDOW_SIZE = args.window
+    MIN_PACKETS = args.min_packets
+    MIN_SIZE    = args.min_size
+
+    print(f"[extract_features] Config: window={WINDOW_SIZE}s, min_packets={MIN_PACKETS}, min_size={MIN_SIZE}b")
+    print(f"[extract_features] Input: {PCAP_DIR}")
+    print(f"[extract_features] Output: {OUTPUT_CSV}")
+    print()
+
     all_rows = []
     all_files = sorted(glob.glob(os.path.join(PCAP_DIR, "*.pcap")))
     print(f"Found {len(all_files)} pcap files\n")

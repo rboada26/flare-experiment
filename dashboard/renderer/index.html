@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PARTNER-LAB Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+<aside id="sidebar">
+
+  <div class="logo">
+    <div class="logo-icon">[P]</div>
+    <div class="logo-text">
+      <span class="logo-primary">PARTNER-LAB</span>
+      <span class="logo-sub">Fine-Grained Fingerprinting</span>
+    </div>
+  </div>
+
+  <!-- Phase selector -->
+  <div class="phase-tabs">
+    <button class="phase-tab active" data-phase="train">Train</button>
+    <button class="phase-tab"        data-phase="test">Test</button>
+  </div>
+
+  <!-- ── TRAIN phase ─────────────────────────────────────────────────────── -->
+  <div id="phase-train" class="phase-content">
+
+    <div class="sidebar-section">
+      <div class="section-label">PRESETS</div>
+      <div class="preset-row">
+        <button class="preset-btn" data-preset="quick">Quick</button>
+        <button class="preset-btn" data-preset="balanced">Balanced</button>
+        <button class="preset-btn active" data-preset="full">Full</button>
+        <button class="preset-btn" data-preset="paper">Paper</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">SESSIONS</div>
+      <div class="pill-group" id="pills-sessions">
+        <button class="pill" data-value="1">1</button>
+        <button class="pill" data-value="2">2</button>
+        <button class="pill" data-value="4">4</button>
+        <button class="pill active" data-value="8">8</button>
+        <button class="pill" data-value="16">16</button>
+
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">FL ROUNDS</div>
+      <div class="pill-group" id="pills-rounds">
+        <button class="pill" data-value="3">3</button>
+        <button class="pill active" data-value="5">5</button>
+        <button class="pill" data-value="10">10</button>
+        <button class="pill" data-value="20">20</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">WINDOW SIZE</div>
+      <div class="pill-group" id="pills-window">
+        <button class="pill" data-value="15">15s</button>
+        <button class="pill active" data-value="30">30s</button>
+        <button class="pill" data-value="60">60s</button>
+        <button class="pill" data-value="300">300s</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">MIN PACKETS</div>
+      <div class="pill-group" id="pills-minPackets">
+        <button class="pill" data-value="25">25</button>
+        <button class="pill active" data-value="50">50</button>
+        <button class="pill" data-value="100">100</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">RF TREES</div>
+      <div class="pill-group" id="pills-trees">
+        <button class="pill" data-value="50">50</button>
+        <button class="pill" data-value="100">100</button>
+        <button class="pill active" data-value="200">200</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">ARCHITECTURES TO TRAIN</div>
+      <div class="arch-toggle-group" id="train-arch-toggles">
+        <button class="arch-toggle active" data-arch="simplecnn" style="--c:#00d4aa">SimpleCNN</button>
+        <button class="arch-toggle active" data-arch="resnet"    style="--c:#818cf8">ResNet18</button>
+        <button class="arch-toggle active" data-arch="mobilenet" style="--c:#f59e0b">MobileNet</button>
+        <button class="arch-toggle active" data-arch="gru"       style="--c:#f472b6">GRU</button>
+        <button class="arch-toggle active" data-arch="lstm"      style="--c:#60a5fa">LSTM</button>
+        <button class="arch-toggle active" data-arch="bilstm"    style="--c:#34d399">BiLSTM</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div id="status-badge" class="status-badge status-idle">Idle</div>
+    </div>
+
+    <div class="sidebar-section action-section">
+      <button id="btn-train" class="btn-run">&#9654; Train Model</button>
+      <button id="btn-stop-train" class="btn-stop" disabled>&#9632; Stop</button>
+    </div>
+
+    <div id="session-steps" class="session-steps hidden">
+      <div class="section-label">SESSION PROGRESS</div>
+      <div id="steps-list"></div>
+    </div>
+
+  </div><!-- /phase-train -->
+
+  <!-- ── TEST phase ──────────────────────────────────────────────────────── -->
+  <div id="phase-test" class="phase-content hidden">
+
+    <div class="sidebar-section">
+      <div id="model-info-card" class="model-info-card">
+        <div class="model-info-none">No trained model.<br>Run Train phase first.</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">ARCHITECTURES TO TEST</div>
+      <div class="arch-toggle-group" id="arch-toggles">
+        <button class="arch-toggle active" data-arch="simplecnn" style="--c:#00d4aa">SimpleCNN</button>
+        <button class="arch-toggle active" data-arch="resnet"    style="--c:#818cf8">ResNet18</button>
+        <button class="arch-toggle active" data-arch="mobilenet" style="--c:#f59e0b">MobileNet</button>
+        <button class="arch-toggle active" data-arch="gru"       style="--c:#f472b6">GRU</button>
+        <button class="arch-toggle active" data-arch="lstm"      style="--c:#60a5fa">LSTM</button>
+        <button class="arch-toggle active" data-arch="bilstm"    style="--c:#34d399">BiLSTM</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">FL ROUNDS</div>
+      <div class="pill-group" id="pills-test-rounds">
+        <button class="pill active" data-value="5">5</button>
+        <button class="pill" data-value="10">10</button>
+        <button class="pill" data-value="20">20</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">LOCKED FROM TRAINING</div>
+      <div id="locked-params" class="locked-params">—</div>
+    </div>
+
+    <div class="sidebar-section">
+      <div id="status-badge-test" class="status-badge status-idle">Idle</div>
+    </div>
+
+    <div class="sidebar-section action-section">
+      <button id="btn-test" class="btn-run btn-test-run" disabled>&#9654; Run Blind Test</button>
+      <button id="btn-stop-test" class="btn-stop" disabled>&#9632; Stop</button>
+    </div>
+
+  </div><!-- /phase-test -->
+
+</aside>
+
+<!-- ── Main ──────────────────────────────────────────────────────────────── -->
+<main id="main-content">
+
+  <!-- Log terminal -->
+  <div id="log-panel">
+    <div class="log-header">
+      <span>Terminal Output</span>
+      <button id="btn-clear-log" class="log-clear-btn">Clear</button>
+    </div>
+    <div id="log-output"></div>
+  </div>
+
+  <!-- Viz panel -->
+  <div id="viz-panel">
+
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="live">Live Captures</button>
+      <button class="tab-btn"        data-tab="results">Results</button>
+      <button class="tab-btn"        data-tab="prediction">Prediction</button>
+    </div>
+
+    <!-- Live tab -->
+    <div id="tab-live" class="tab-content active">
+      <div class="chart-card full-width">
+        <div class="chart-card-title">PCAP File Sizes (bytes)</div>
+        <div class="chart-wrap"><canvas id="chart-captures"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Results tab (train) -->
+    <div id="tab-results" class="tab-content">
+      <div class="metric-cards">
+        <div class="metric-card">
+          <div class="metric-value" id="card-bestf1">—</div>
+          <div class="metric-label">Best F1</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value" id="card-cnnf1">—</div>
+          <div class="metric-label">CNN Family F1</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value" id="card-rnnf1">—</div>
+          <div class="metric-label">RNN Family F1</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value" id="card-windows">—</div>
+          <div class="metric-label">Windows</div>
+        </div>
+      </div>
+      <div class="results-row">
+        <div class="chart-card">
+          <div class="chart-card-title">Confusion Matrix</div>
+          <div id="cm-container"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">F1 by Variant</div>
+          <div class="chart-wrap"><canvas id="chart-f1variants"></canvas></div>
+        </div>
+      </div>
+      <div class="results-row">
+        <div class="chart-card">
+          <div class="chart-card-title">Feature Importance (Top 12)</div>
+          <div class="chart-wrap chart-wrap-tall"><canvas id="chart-importance"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">Intra-Family Analysis</div>
+          <div class="chart-wrap"><canvas id="chart-family"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prediction tab (test) -->
+    <div id="tab-prediction" class="tab-content">
+      <div id="pred-model-row" class="pred-model-row hidden"></div>
+      <div id="pred-overall-row" class="pred-overall-row hidden"></div>
+      <div id="pred-grid" class="pred-grid"></div>
+      <div id="pred-empty" class="pred-empty">
+        Run a <strong>Blind Test</strong> to see predictions here.
+      </div>
+    </div>
+
+  </div><!-- /viz-panel -->
+
+</main>
+
+<script src="../node_modules/chart.js/dist/chart.umd.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>

@@ -1,24 +1,36 @@
-# Captured traffic - too large for git, regenerate with collect_data.sh
-captures/*.pcap
+# ── Generated experiment artifacts ───────────────────────────────────────────
+captures/
+model/
+features.csv
+cv_results.csv
+cv_results_multiclass.csv
+confusion_matrix.csv
+feature_importance.csv
+feature_importance_multiclass.csv
+family_f1.json
+prediction_results.json
 
-# Python cache
+# ── Docker runtime config (auto-written by collect_data.sh) ──────────────────
+.env
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
 .pytest_cache/
+.ipynb_checkpoints/
+venv/
+*.pkl
 
-# Dataset files downloaded at build time
+# ── Node / Electron ───────────────────────────────────────────────────────────
+node_modules/
+dashboard/node_modules/
+
+# ── Dataset files downloaded at container build time ─────────────────────────
 clients/cnn_client/data/
 clients/rnn_client/data/
 
-# Jupyter notebooks checkpoints
-.ipynb_checkpoints/
-
-# Virtual environments
-venv/
-.env/
-
-# OS files
+# ── OS noise ──────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-*.zip

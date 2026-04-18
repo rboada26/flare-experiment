@@ -1,0 +1,9 @@
+{
+  "name": "partner-lab-dashboard",
+  "version": "1.0.0",
+  "description": "PARTNER-LAB Fine-Grained Fingerprinting Dashboard",
+  "main": "main.js",
+  "scripts": { "start": "electron ." },
+  "dependencies": { "chart.js": "^4.4.0" },
+  "devDependencies": { "electron": "^29.0.0" }
+}

@@ -1,7 +1,3 @@
-,SimpleCNN,ResNet18,MobileNet,GRU,LSTM,BiLSTM
-SimpleCNN,47,0,1,0,0,0
-ResNet18,0,55,1,0,0,0
-MobileNet,0,1,53,0,0,0
-GRU,0,0,0,46,1,1
-LSTM,0,0,0,1,47,0
-BiLSTM,0,0,0,0,1,47
+,SimpleCNN,LSTM
+SimpleCNN,8,0
+LSTM,0,8

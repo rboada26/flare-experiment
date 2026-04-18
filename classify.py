@@ -1,5 +1,10 @@
+import argparse
+import json
+import os
 import pandas as pd
 import numpy as np
+import joblib
+from datetime import datetime
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
@@ -8,6 +13,15 @@ from sklearn.metrics import (precision_score, recall_score, f1_score,
                              classification_report, confusion_matrix)
 import warnings
 warnings.filterwarnings("ignore")
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+parser = argparse.ArgumentParser(description="Classify FL traffic fingerprints")
+parser.add_argument("--n-estimators", type=int, default=200,
+                    help="Number of trees in Random Forest (default: 200)")
+args = parser.parse_args()
+N_ESTIMATORS = args.n_estimators
+
+print(f"[classify] n_estimators={N_ESTIMATORS}")
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 df = pd.read_csv("features.csv")
@@ -52,9 +66,9 @@ for fold, (train_idx, test_idx) in enumerate(cv.split(X_flow, y)):
 
     # Base Random Forests
     rf_flow = RandomForestClassifier(
-        n_estimators=200, class_weight="balanced", random_state=42, n_jobs=-1)
+        n_estimators=N_ESTIMATORS, class_weight="balanced", random_state=42, n_jobs=-1)
     rf_pkt  = RandomForestClassifier(
-        n_estimators=200, class_weight="balanced", random_state=42, n_jobs=-1)
+        n_estimators=N_ESTIMATORS, class_weight="balanced", random_state=42, n_jobs=-1)
     rf_flow.fit(Xf_tr, y_tr)
     rf_pkt.fit(Xp_tr, y_tr)
 
@@ -66,7 +80,7 @@ for fold, (train_idx, test_idx) in enumerate(cv.split(X_flow, y)):
     meta_lr  = LogisticRegression(
         class_weight="balanced", random_state=42, max_iter=1000, C=1.0)
     meta_xgb = GradientBoostingClassifier(
-        n_estimators=200, random_state=42, max_depth=3)
+        n_estimators=N_ESTIMATORS, random_state=42, max_depth=3)
     meta_lr.fit(meta_tr, y_tr)
     meta_xgb.fit(meta_tr, y_tr)
 
@@ -106,9 +120,10 @@ print(pivot[variants].round(3).to_string())
 
 # ── Best variant confusion matrix ─────────────────────────────────────────────
 best_variant = detail_df.groupby("variant")["f1"].mean().idxmax()
+present_labels = sorted(np.unique(y))
+arch_order     = [ARCH_NAMES[i] for i in present_labels]
 print(f"\nConfusion matrix — best variant: {best_variant}")
 cm = confusion_matrix(all_y_true[best_variant], all_y_pred[best_variant])
-arch_order = [ARCH_NAMES[i] for i in range(6)]
 cm_df = pd.DataFrame(cm, index=arch_order, columns=arch_order)
 print(cm_df.to_string())
 
@@ -121,7 +136,7 @@ print(classification_report(
 # ── Feature importance ────────────────────────────────────────────────────────
 print("Top 15 most important flow features (full dataset RF):")
 rf_full = RandomForestClassifier(
-    n_estimators=200, class_weight="balanced", random_state=42, n_jobs=-1)
+    n_estimators=N_ESTIMATORS, class_weight="balanced", random_state=42, n_jobs=-1)
 scaler = StandardScaler()
 rf_full.fit(scaler.fit_transform(X_flow), y)
 imp_df = pd.DataFrame({
@@ -131,34 +146,103 @@ imp_df = pd.DataFrame({
 print(imp_df.head(15).to_string(index=False))
 
 # ── CNN-only and RNN-only sub-analysis ───────────────────────────────────────
+cnn_present = [l for l in present_labels if l in [0, 1, 2]]
+rnn_present = [l for l in present_labels if l in [3, 4, 5]]
+
+cnn_mean, cnn_std = 0.0, 0.0
 print("\n--- CNN family only (SimpleCNN vs ResNet18 vs MobileNet) ---")
-cnn_mask = df["label"].isin([0,1,2])
-Xf_cnn = StandardScaler().fit_transform(X_flow[cnn_mask])
-y_cnn  = y[cnn_mask]
-cv_cnn = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-cnn_f1s = []
-for tr, te in cv_cnn.split(Xf_cnn, y_cnn):
-    rf = RandomForestClassifier(n_estimators=200, class_weight="balanced",
-                                random_state=42, n_jobs=-1)
-    rf.fit(Xf_cnn[tr], y_cnn[tr])
-    cnn_f1s.append(f1_score(y_cnn[te], rf.predict(Xf_cnn[te]), average="macro"))
-print(f"CNN intra-family F1: {np.mean(cnn_f1s):.3f} ± {np.std(cnn_f1s):.3f}")
+if len(cnn_present) >= 2:
+    cnn_mask = df["label"].isin(cnn_present)
+    Xf_cnn = StandardScaler().fit_transform(X_flow[cnn_mask])
+    y_cnn  = y[cnn_mask]
+    cv_cnn = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cnn_f1s = []
+    for tr, te in cv_cnn.split(Xf_cnn, y_cnn):
+        rf = RandomForestClassifier(n_estimators=N_ESTIMATORS, class_weight="balanced",
+                                    random_state=42, n_jobs=-1)
+        rf.fit(Xf_cnn[tr], y_cnn[tr])
+        cnn_f1s.append(f1_score(y_cnn[te], rf.predict(Xf_cnn[te]), average="macro"))
+    cnn_mean = float(np.mean(cnn_f1s))
+    cnn_std  = float(np.std(cnn_f1s))
+    print(f"CNN intra-family F1: {cnn_mean:.3f} ± {cnn_std:.3f}")
+else:
+    print(f"Skipped — only {len(cnn_present)} CNN architecture(s) in dataset.")
 
+rnn_mean, rnn_std = 0.0, 0.0
 print("\n--- RNN family only (GRU vs LSTM vs BiLSTM) ---")
-rnn_mask = df["label"].isin([3,4,5])
-Xf_rnn = StandardScaler().fit_transform(X_flow[rnn_mask])
-y_rnn  = y[rnn_mask]
-cv_rnn = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-rnn_f1s = []
-for tr, te in cv_rnn.split(Xf_rnn, y_rnn):
-    rf = RandomForestClassifier(n_estimators=200, class_weight="balanced",
-                                random_state=42, n_jobs=-1)
-    rf.fit(Xf_rnn[tr], y_rnn[tr])
-    rnn_f1s.append(f1_score(y_rnn[te], rf.predict(Xf_rnn[te]), average="macro"))
-print(f"RNN intra-family F1: {np.mean(rnn_f1s):.3f} ± {np.std(rnn_f1s):.3f}")
+if len(rnn_present) >= 2:
+    rnn_mask = df["label"].isin(rnn_present)
+    Xf_rnn = StandardScaler().fit_transform(X_flow[rnn_mask])
+    y_rnn  = y[rnn_mask]
+    cv_rnn = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    rnn_f1s = []
+    for tr, te in cv_rnn.split(Xf_rnn, y_rnn):
+        rf = RandomForestClassifier(n_estimators=N_ESTIMATORS, class_weight="balanced",
+                                    random_state=42, n_jobs=-1)
+        rf.fit(Xf_rnn[tr], y_rnn[tr])
+        rnn_f1s.append(f1_score(y_rnn[te], rf.predict(Xf_rnn[te]), average="macro"))
+    rnn_mean = float(np.mean(rnn_f1s))
+    rnn_std  = float(np.std(rnn_f1s))
+    print(f"RNN intra-family F1: {rnn_mean:.3f} ± {rnn_std:.3f}")
+else:
+    print(f"Skipped — only {len(rnn_present)} RNN architecture(s) in dataset.")
 
-# ── Save ──────────────────────────────────────────────────────────────────────
+# ── Write family_f1.json ──────────────────────────────────────────────────────
+family_f1 = {
+    "cnn": {"mean": round(cnn_mean, 4), "std": round(cnn_std, 4)} if len(cnn_present) >= 2 else None,
+    "rnn": {"mean": round(rnn_mean, 4), "std": round(rnn_std, 4)} if len(rnn_present) >= 2 else None,
+}
+with open("family_f1.json", "w") as f:
+    json.dump(family_f1, f, indent=2)
+print(f"Saved: family_f1.json → CNN {cnn_mean:.3f}±{cnn_std:.3f}, RNN {rnn_mean:.3f}±{rnn_std:.3f}")
+
+# ── Save CSVs ─────────────────────────────────────────────────────────────────
 detail_df.to_csv("cv_results_multiclass.csv", index=False)
 imp_df.to_csv("feature_importance_multiclass.csv", index=False)
 cm_df.to_csv("confusion_matrix.csv")
 print("\nSaved: cv_results_multiclass.csv, feature_importance_multiclass.csv, confusion_matrix.csv")
+
+# ── Save trained model ────────────────────────────────────────────────────────
+print("\n[classify] Training final models on full dataset for deployment...")
+os.makedirs("model", exist_ok=True)
+
+fs_flow = StandardScaler().fit(X_flow)
+fs_pkt  = StandardScaler().fit(X_pkt)
+Xf_all  = fs_flow.transform(X_flow)
+Xp_all  = fs_pkt.transform(X_pkt)
+
+fr_flow = RandomForestClassifier(n_estimators=N_ESTIMATORS, class_weight="balanced",
+                                  random_state=42, n_jobs=-1)
+fr_pkt  = RandomForestClassifier(n_estimators=N_ESTIMATORS, class_weight="balanced",
+                                  random_state=42, n_jobs=-1)
+fr_flow.fit(Xf_all, y)
+fr_pkt.fit(Xp_all, y)
+
+_meta_all = np.hstack([fr_flow.predict_proba(Xf_all), fr_pkt.predict_proba(Xp_all)])
+fm_lr  = LogisticRegression(class_weight="balanced", random_state=42, max_iter=1000, C=1.0)
+fm_xgb = GradientBoostingClassifier(n_estimators=N_ESTIMATORS, random_state=42, max_depth=3)
+fm_lr.fit(_meta_all, y)
+fm_xgb.fit(_meta_all, y)
+
+_best_f1_mean = float(detail_df[detail_df["variant"] == best_variant]["f1"].mean())
+_best_f1_std  = float(detail_df[detail_df["variant"] == best_variant]["f1"].std())
+
+bundle = {
+    "rf_flow":      fr_flow,
+    "rf_pkt":       fr_pkt,
+    "meta_lr":      fm_lr,
+    "meta_xgb":     fm_xgb,
+    "scaler_flow":  fs_flow,
+    "scaler_pkt":   fs_pkt,
+    "flow_cols":    FLOW_COLS,
+    "pkt_cols":     PKT_COLS,
+    "best_variant": best_variant,
+    "arch_names":   ARCH_NAMES,
+    "trained_at":   datetime.now().isoformat(),
+    "cv_f1_mean":   _best_f1_mean,
+    "cv_f1_std":    _best_f1_std,
+    "n_windows":    len(df),
+}
+joblib.dump(bundle, "model/model.pkl")
+print(f"Saved: model/model.pkl  "
+      f"(variant={best_variant}, F1={_best_f1_mean:.3f}±{_best_f1_std:.3f})")
