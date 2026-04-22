@@ -1,25 +1,22 @@
+import os, time
 import flwr as fl
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 from collections import OrderedDict
+from uci_har import load_uci_har, apply_jitter
 
-def make_dataset(n, seq_len=50, features=9, classes=6):
-    return TensorDataset(
-        torch.randn(n, seq_len, features),
-        torch.randint(0, classes, (n,))
-    )
+apply_jitter()
 
-trainset    = make_dataset(500)   # was 2000
-testset     = make_dataset(100)   # was 400
-trainloader = DataLoader(trainset, batch_size=128, shuffle=True)
-testloader  = DataLoader(testset,  batch_size=128)
+trainset, testset = load_uci_har()
+trainloader = DataLoader(trainset, batch_size=64, shuffle=True)
+testloader  = DataLoader(testset,  batch_size=64)
 
 class GRUModel(nn.Module):
-    def __init__(self, input_size=9, hidden=64, layers=1, classes=6):
+    def __init__(self, input_size=9, hidden=64, layers=2, classes=6):
         super().__init__()
         self.gru = nn.GRU(input_size, hidden, layers,
-                          batch_first=True, bidirectional=True)
+                          batch_first=True, bidirectional=True, dropout=0.3)
         self.fc  = nn.Linear(hidden * 2, classes)
     def forward(self, x):
         out, _ = self.gru(x)
@@ -64,7 +61,6 @@ class RNNClient(fl.client.NumPyClient):
         return loss / len(testloader), total, {"accuracy": correct / total}
 
 if __name__ == "__main__":
-    import os, time
     time.sleep(8)
     fl.client.start_client(
         server_address=f"{os.environ.get('FL_SERVER_ADDR', 'rnn_server')}:8080",

@@ -32,10 +32,20 @@ networks:
       config:
         - subnet: 172.21.2.0/24
 
+# ── Shared resource limits ────────────────────────────────────────────────────
+x-server-resources: &server-resources
+  mem_limit: 1g
+  memswap_limit: 1g
+
+x-client-resources: &client-resources
+  mem_limit: 2g
+  memswap_limit: 2g
+
 services:
   simplecnn_server:
     build: ./server
     container_name: fl_simplecnn_server
+    <<: *server-resources
     networks:
       simplecnn_network:
         ipv4_address: 172.20.0.10
@@ -49,6 +59,7 @@ services:
       context: ./clients
       dockerfile: cnn_client/Dockerfile
     container_name: fl_simplecnn_client
+    <<: *client-resources
     networks:
       simplecnn_network:
         ipv4_address: 172.20.0.11
@@ -62,6 +73,7 @@ services:
       context: ./clients
       dockerfile: cnn_client/Dockerfile
     container_name: fl_simplecnn_client2
+    <<: *client-resources
     networks:
       simplecnn_network:
         ipv4_address: 172.20.0.12
@@ -73,6 +85,7 @@ services:
   resnet_server:
     build: ./server
     container_name: fl_resnet_server
+    <<: *server-resources
     networks:
       resnet_network:
         ipv4_address: 172.20.1.10
@@ -86,6 +99,7 @@ services:
       context: ./clients
       dockerfile: resnet_client/Dockerfile
     container_name: fl_resnet_client
+    <<: *client-resources
     networks:
       resnet_network:
         ipv4_address: 172.20.1.11
@@ -99,6 +113,7 @@ services:
       context: ./clients
       dockerfile: resnet_client/Dockerfile
     container_name: fl_resnet_client2
+    <<: *client-resources
     networks:
       resnet_network:
         ipv4_address: 172.20.1.12
@@ -110,6 +125,7 @@ services:
   mobilenet_server:
     build: ./server
     container_name: fl_mobilenet_server
+    <<: *server-resources
     networks:
       mobilenet_network:
         ipv4_address: 172.20.2.10
@@ -123,6 +139,7 @@ services:
       context: ./clients
       dockerfile: mobilenet_client/Dockerfile
     container_name: fl_mobilenet_client
+    <<: *client-resources
     networks:
       mobilenet_network:
         ipv4_address: 172.20.2.11
@@ -136,6 +153,7 @@ services:
       context: ./clients
       dockerfile: mobilenet_client/Dockerfile
     container_name: fl_mobilenet_client2
+    <<: *client-resources
     networks:
       mobilenet_network:
         ipv4_address: 172.20.2.12
@@ -147,6 +165,7 @@ services:
   gru_server:
     build: ./server
     container_name: fl_gru_server
+    <<: *server-resources
     networks:
       gru_network:
         ipv4_address: 172.21.0.10
@@ -160,11 +179,15 @@ services:
       context: ./clients
       dockerfile: rnn_client/Dockerfile
     container_name: fl_gru_client
+    <<: *client-resources
+    cap_add:
+      - NET_ADMIN
     networks:
       gru_network:
         ipv4_address: 172.21.0.11
     environment:
       - FL_SERVER_ADDR=172.21.0.10
+      - NETWORK_JITTER=true
     depends_on:
       - gru_server
 
@@ -173,17 +196,22 @@ services:
       context: ./clients
       dockerfile: rnn_client/Dockerfile
     container_name: fl_gru_client2
+    <<: *client-resources
+    cap_add:
+      - NET_ADMIN
     networks:
       gru_network:
         ipv4_address: 172.21.0.12
     environment:
       - FL_SERVER_ADDR=172.21.0.10
+      - NETWORK_JITTER=true
     depends_on:
       - gru_server
 
   lstm_server:
     build: ./server
     container_name: fl_lstm_server
+    <<: *server-resources
     networks:
       lstm_network:
         ipv4_address: 172.21.1.10
@@ -197,11 +225,15 @@ services:
       context: ./clients
       dockerfile: lstm_client/Dockerfile
     container_name: fl_lstm_client
+    <<: *client-resources
+    cap_add:
+      - NET_ADMIN
     networks:
       lstm_network:
         ipv4_address: 172.21.1.11
     environment:
       - FL_SERVER_ADDR=172.21.1.10
+      - NETWORK_JITTER=true
     depends_on:
       - lstm_server
 
@@ -210,17 +242,22 @@ services:
       context: ./clients
       dockerfile: lstm_client/Dockerfile
     container_name: fl_lstm_client2
+    <<: *client-resources
+    cap_add:
+      - NET_ADMIN
     networks:
       lstm_network:
         ipv4_address: 172.21.1.12
     environment:
       - FL_SERVER_ADDR=172.21.1.10
+      - NETWORK_JITTER=true
     depends_on:
       - lstm_server
 
   bilstm_server:
     build: ./server
     container_name: fl_bilstm_server
+    <<: *server-resources
     networks:
       bilstm_network:
         ipv4_address: 172.21.2.10
@@ -234,11 +271,15 @@ services:
       context: ./clients
       dockerfile: bilstm_client/Dockerfile
     container_name: fl_bilstm_client
+    <<: *client-resources
+    cap_add:
+      - NET_ADMIN
     networks:
       bilstm_network:
         ipv4_address: 172.21.2.11
     environment:
       - FL_SERVER_ADDR=172.21.2.10
+      - NETWORK_JITTER=true
     depends_on:
       - bilstm_server
 
@@ -247,10 +288,14 @@ services:
       context: ./clients
       dockerfile: bilstm_client/Dockerfile
     container_name: fl_bilstm_client2
+    <<: *client-resources
+    cap_add:
+      - NET_ADMIN
     networks:
       bilstm_network:
         ipv4_address: 172.21.2.12
     environment:
       - FL_SERVER_ADDR=172.21.2.10
+      - NETWORK_JITTER=true
     depends_on:
       - bilstm_server

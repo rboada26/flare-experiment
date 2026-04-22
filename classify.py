@@ -149,48 +149,58 @@ print(imp_df.head(15).to_string(index=False))
 cnn_present = [l for l in present_labels if l in [0, 1, 2]]
 rnn_present = [l for l in present_labels if l in [3, 4, 5]]
 
-cnn_mean, cnn_std = 0.0, 0.0
+cnn_mean, cnn_std, cnn_per_arch = 0.0, 0.0, {}
 print("\n--- CNN family only (SimpleCNN vs ResNet18 vs MobileNet) ---")
 if len(cnn_present) >= 2:
     cnn_mask = df["label"].isin(cnn_present)
     Xf_cnn = StandardScaler().fit_transform(X_flow[cnn_mask])
     y_cnn  = y[cnn_mask]
     cv_cnn = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    cnn_f1s = []
+    cnn_f1s, all_cnn_true, all_cnn_pred = [], [], []
     for tr, te in cv_cnn.split(Xf_cnn, y_cnn):
         rf = RandomForestClassifier(n_estimators=N_ESTIMATORS, class_weight="balanced",
                                     random_state=42, n_jobs=-1)
         rf.fit(Xf_cnn[tr], y_cnn[tr])
-        cnn_f1s.append(f1_score(y_cnn[te], rf.predict(Xf_cnn[te]), average="macro"))
+        pred = rf.predict(Xf_cnn[te])
+        cnn_f1s.append(f1_score(y_cnn[te], pred, average="macro"))
+        all_cnn_true.extend(y_cnn[te]); all_cnn_pred.extend(pred)
     cnn_mean = float(np.mean(cnn_f1s))
     cnn_std  = float(np.std(cnn_f1s))
     print(f"CNN intra-family F1: {cnn_mean:.3f} ± {cnn_std:.3f}")
+    rpt = classification_report(all_cnn_true, all_cnn_pred, output_dict=True, zero_division=0)
+    cnn_per_arch = {ARCH_NAMES[l]: round(rpt[str(l)]['f1-score'], 4)
+                    for l in cnn_present if str(l) in rpt}
 else:
     print(f"Skipped — only {len(cnn_present)} CNN architecture(s) in dataset.")
 
-rnn_mean, rnn_std = 0.0, 0.0
+rnn_mean, rnn_std, rnn_per_arch = 0.0, 0.0, {}
 print("\n--- RNN family only (GRU vs LSTM vs BiLSTM) ---")
 if len(rnn_present) >= 2:
     rnn_mask = df["label"].isin(rnn_present)
     Xf_rnn = StandardScaler().fit_transform(X_flow[rnn_mask])
     y_rnn  = y[rnn_mask]
     cv_rnn = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    rnn_f1s = []
+    rnn_f1s, all_rnn_true, all_rnn_pred = [], [], []
     for tr, te in cv_rnn.split(Xf_rnn, y_rnn):
         rf = RandomForestClassifier(n_estimators=N_ESTIMATORS, class_weight="balanced",
                                     random_state=42, n_jobs=-1)
         rf.fit(Xf_rnn[tr], y_rnn[tr])
-        rnn_f1s.append(f1_score(y_rnn[te], rf.predict(Xf_rnn[te]), average="macro"))
+        pred = rf.predict(Xf_rnn[te])
+        rnn_f1s.append(f1_score(y_rnn[te], pred, average="macro"))
+        all_rnn_true.extend(y_rnn[te]); all_rnn_pred.extend(pred)
     rnn_mean = float(np.mean(rnn_f1s))
     rnn_std  = float(np.std(rnn_f1s))
     print(f"RNN intra-family F1: {rnn_mean:.3f} ± {rnn_std:.3f}")
+    rpt = classification_report(all_rnn_true, all_rnn_pred, output_dict=True, zero_division=0)
+    rnn_per_arch = {ARCH_NAMES[l]: round(rpt[str(l)]['f1-score'], 4)
+                    for l in rnn_present if str(l) in rpt}
 else:
     print(f"Skipped — only {len(rnn_present)} RNN architecture(s) in dataset.")
 
 # ── Write family_f1.json ──────────────────────────────────────────────────────
 family_f1 = {
-    "cnn": {"mean": round(cnn_mean, 4), "std": round(cnn_std, 4)} if len(cnn_present) >= 2 else None,
-    "rnn": {"mean": round(rnn_mean, 4), "std": round(rnn_std, 4)} if len(rnn_present) >= 2 else None,
+    "cnn": {"mean": round(cnn_mean, 4), "std": round(cnn_std, 4), "per_arch": cnn_per_arch} if len(cnn_present) >= 2 else None,
+    "rnn": {"mean": round(rnn_mean, 4), "std": round(rnn_std, 4), "per_arch": rnn_per_arch} if len(rnn_present) >= 2 else None,
 }
 with open("family_f1.json", "w") as f:
     json.dump(family_f1, f, indent=2)

@@ -27,10 +27,10 @@ transform = transforms.Compose([
 # Use only 2000 train / 400 test samples so each round takes ~10s on CPU
 full_train = torchvision.datasets.CIFAR10("./data", train=True,  download=True, transform=transform)
 full_test  = torchvision.datasets.CIFAR10("./data", train=False, download=True, transform=transform)
-trainset = Subset(full_train, range(500))   # was 2000
-testset  = Subset(full_test,  range(100))   # was 400
-trainloader = DataLoader(trainset, batch_size=128, shuffle=True)  # was 64
-testloader  = DataLoader(testset,  batch_size=128)
+trainset = Subset(full_train, range(50))
+testset  = Subset(full_test,  range(20))
+trainloader = DataLoader(trainset, batch_size=32, shuffle=True)
+testloader  = DataLoader(testset,  batch_size=32)
 
 device    = torch.device("cpu")
 model     = SimpleCNN().to(device)

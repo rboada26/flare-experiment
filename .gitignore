@@ -1,6 +1,13 @@
-# ── Generated experiment artifacts ───────────────────────────────────────────
+# ── Network traffic captures (sensitive — raw packet data) ───────────────────
 captures/
+*.pcap
+*.pcapng
+
+# ── Trained models & snapshots (may encode traffic patterns / fingerprints) ───
 model/
+saved_models/
+
+# ── Generated experiment artifacts ───────────────────────────────────────────
 features.csv
 cv_results.csv
 cv_results_multiclass.csv
@@ -10,27 +17,53 @@ feature_importance_multiclass.csv
 family_f1.json
 prediction_results.json
 
-# ── Docker runtime config (auto-written by collect_data.sh) ──────────────────
+# ── Debug / runtime logs ──────────────────────────────────────────────────────
+debug/
+logs/
+*.log
+
+# ── Docker / environment secrets ──────────────────────────────────────────────
 .env
+.env.*
+*.key
+*.pem
+*.crt
+secrets.*
+credentials.json
+
+# ── Dataset files downloaded at container build time ─────────────────────────
+# Covers all 6 client data dirs (CIFAR-10, etc.)
+clients/*/data/
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.pkl
 .pytest_cache/
 .ipynb_checkpoints/
 venv/
-*.pkl
+env/
+.venv/
 
 # ── Node / Electron ───────────────────────────────────────────────────────────
 node_modules/
 dashboard/node_modules/
+dist/
+out/
+build/
 
-# ── Dataset files downloaded at container build time ─────────────────────────
-clients/cnn_client/data/
-clients/rnn_client/data/
+# ── IDE configs ───────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
 
 # ── OS noise ──────────────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
 Thumbs.db
+ehthumbs.db

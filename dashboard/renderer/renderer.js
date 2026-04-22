@@ -9,13 +9,21 @@ const PRESETS = {
 };
 
 const ARCH_COLORS = {
-  simplecnn: '#00d4aa', resnet: '#818cf8', mobilenet: '#f59e0b',
-  gru: '#f472b6', lstm: '#60a5fa', bilstm: '#34d399',
+  lstm:      '#60a5fa',
+  gru:       '#f472b6',
+  bilstm:    '#34d399',
+  simplecnn: '#94a3b8',
+  mobilenet: '#fb923c',
+  resnet:    '#a78bfa',
 };
+const ARCH_FAMILY = { lstm:'r', gru:'r', bilstm:'r', simplecnn:'c', mobilenet:'c', resnet:'c' };
 
 /* ── Chart instances ──────────────────────────────────────────────────────── */
-let chartCaptures = null, chartF1Variants = null,
-    chartImportance = null, chartFamily = null;
+let chartCapturesTrain = null, chartCapturesTest = null,
+    chartF1Variants = null, chartImportance = null, chartFamily = null;
+
+// tracks whether the live tab showing is train or test
+let livePhase = 'train';
 
 /* ── DOM helpers ──────────────────────────────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -31,7 +39,7 @@ $$('.phase-tab').forEach(tab => {
     currentPhase = tab.dataset.phase;
     $$('.phase-tab').forEach(t => t.classList.toggle('active', t === tab));
     $$('.phase-content').forEach(c => c.classList.toggle('hidden', c.id !== `phase-${currentPhase}`));
-    if (currentPhase === 'test') refreshModelInfoCard();
+    if (currentPhase === 'test') { refreshModelInfoCard(); }
   });
 });
 
@@ -248,10 +256,11 @@ btnTrain.addEventListener('click', async () => {
   logOutput.innerHTML = '';
   resetMetricCards();
   clearCharts();
+  livePhase = 'train';
   setStatus('running');
-  switchTab('live');
+  switchTab('live-train');
   buildSessionSteps(params.sessions);
-  $$('.phase-tab').forEach(t => t.classList.add('disabled'));
+  $$('.phase-tab').forEach(t => { if (t.dataset.phase !== 'info') t.classList.add('disabled'); });
   btnTrain.disabled     = true;
   btnStopTrain.disabled = false;
 
@@ -279,10 +288,12 @@ btnTest.addEventListener('click', async () => {
   const archs  = getSelectedArchs('arch-toggles');
 
   logOutput.innerHTML = '';
+  livePhase = 'test';
+  startNewTestRun();
   setStatus('running');
-  switchTab('live');
+  switchTab('live-test');
   buildSessionSteps(1);
-  $$('.phase-tab').forEach(t => t.classList.add('disabled'));
+  $$('.phase-tab').forEach(t => { if (t.dataset.phase !== 'info') t.classList.add('disabled'); });
   btnTest.disabled     = true;
   btnStopTest.disabled = false;
 
@@ -312,7 +323,10 @@ window.lab.onStatus(setStatus);
 window.lab.onSessionStart(n => { appendLog(`[session] Session ${n} started`); setStepRunning(n); });
 window.lab.onSessionDone(n  => { appendLog(`[session] Session ${n} complete`); setStepDone(n);   });
 window.lab.onCaptures(renderCaptureChart);
-window.lab.onResults(data => { switchTab('results'); renderResults(data); });
+window.lab.onResults(data => {
+  switchTab('results');
+  renderResults(data);
+});
 window.lab.onPrediction(data => { switchTab('prediction'); renderPrediction(data); });
 window.lab.onModelInfo(info => { cachedModelInfo = info; renderModelInfoCard(info); });
 
@@ -346,39 +360,57 @@ const SCALE_DEFAULTS = {
 };
 
 function clearCharts() {
-  [chartCaptures, chartF1Variants, chartImportance, chartFamily].forEach(c => { if (c) c.destroy(); });
-  chartCaptures = chartF1Variants = chartImportance = chartFamily = null;
+  [chartCapturesTrain, chartCapturesTest, chartF1Variants, chartImportance, chartFamily].forEach(c => { if (c) c.destroy(); });
+  chartCapturesTrain = chartCapturesTest = chartF1Variants = chartImportance = chartFamily = null;
   $('#cm-container').innerHTML = '';
+  clearDumbbell();
 }
 
 /* ── Capture chart ────────────────────────────────────────────────────────── */
-function renderCaptureChart(list) {
-  const canvas = $('#chart-captures');
-  if (!canvas) return;
-  const labels = list.map(f => f.name.length > 28 ? '...' + f.name.slice(-25) : f.name);
-  const data   = list.map(f => f.size);
-  const colors = list.map(f => ARCH_COLORS[f.arch] || '#6b7799');
+const ARCH_ORDER_CAP = ['lstm','gru','bilstm','simplecnn','mobilenet','resnet'];
 
-  if (chartCaptures) {
-    chartCaptures.data.labels = labels;
-    chartCaptures.data.datasets[0].data = data;
-    chartCaptures.data.datasets[0].backgroundColor = colors;
-    chartCaptures.update('none');
-    return;
-  }
-  chartCaptures = new Chart(canvas, {
+function renderCaptureChart(list) {
+  // Aggregate bytes per arch across all sessions
+  const archMap = {};
+  list.forEach(f => { archMap[f.arch] = (archMap[f.arch] || 0) + f.size; });
+  const activeArchs = ARCH_ORDER_CAP.filter(a => archMap[a] !== undefined);
+  const labels  = activeArchs.map(a => `${a.toUpperCase()} (${ARCH_FAMILY[a] || '?'})`);
+  const data    = activeArchs.map(a => archMap[a]);
+  const colors  = activeArchs.map(a => ARCH_COLORS[a] || '#6b7799');
+
+  const isTest  = livePhase === 'test';
+  const canvasId = isTest ? '#chart-captures-test' : '#chart-captures-train';
+  const canvas   = $(canvasId);
+  if (!canvas) return;
+
+  const chartRef = isTest ? chartCapturesTest : chartCapturesTrain;
+  const chartOptions = {
     type: 'bar',
-    data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, borderRadius: 3 }] },
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, borderRadius: 4 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { ...TOOLTIP_DEFAULTS,
-        callbacks: { label: ctx => `${(ctx.raw/1024).toFixed(1)} KB` } } },
+        callbacks: {
+          title: (items) => labels[items[0].dataIndex] || '',
+          label: ctx => `${(ctx.raw/1024).toFixed(1)} KB total`,
+        } } },
       scales: {
-        x: { ...SCALE_DEFAULTS.x, ticks: { color:'#6b7799', maxRotation:45, font:{size:9} } },
+        x: { ...SCALE_DEFAULTS.x, ticks: { color:'#dde2f0', font:{ size:10 } } },
         y: { ...SCALE_DEFAULTS.y, ticks: { color:'#6b7799', callback: v => (v/1024).toFixed(0)+'K' } },
       },
     },
-  });
+  };
+
+  if (chartRef) {
+    chartRef.data.labels = labels;
+    chartRef.data.datasets[0].data   = data;
+    chartRef.data.datasets[0].backgroundColor = colors;
+    chartRef.update('none');
+    return;
+  }
+  const newChart = new Chart(canvas, chartOptions);
+  if (isTest) chartCapturesTest = newChart;
+  else        chartCapturesTrain = newChart;
 }
 
 /* ── Metric cards ─────────────────────────────────────────────────────────── */
@@ -426,7 +458,7 @@ function renderF1VariantsChart(variants, means) {
   chartF1Variants = new Chart(canvas, {
     type: 'bar',
     data: { labels: variants.map(v => v.replace('fusion_','').replace('_only',' only')),
-            datasets: [{ data: means, backgroundColor:['#00d4aa','#818cf8','#f59e0b','#f472b6'],
+            datasets: [{ data: means, backgroundColor:[ARCH_COLORS.lstm, ARCH_COLORS.gru, ARCH_COLORS.mobilenet, ARCH_COLORS.resnet, ARCH_COLORS.simplecnn, ARCH_COLORS.bilstm].slice(0, variants.length),
                          borderWidth:0, borderRadius:4 }] },
     options: { responsive:true, maintainAspectRatio:false,
       plugins: { legend:{display:false}, tooltip:{...TOOLTIP_DEFAULTS,
@@ -459,20 +491,41 @@ function renderFamilyChart(fj) {
   if (!canvas) return;
   if (chartFamily) chartFamily.destroy();
   const { cnn, rnn } = fj;
-  const labels = [], data = [], colors = [];
-  if (cnn) { labels.push('CNN Family'); data.push(cnn.mean); colors.push('#00d4aa'); }
-  if (rnn) { labels.push('RNN Family'); data.push(rnn.mean); colors.push('#818cf8'); }
+  const ARCH_KEY = { 'SimpleCNN':'simplecnn', 'ResNet18':'resnet', 'MobileNet':'mobilenet',
+                     'GRU':'gru', 'LSTM':'lstm', 'BiLSTM':'bilstm' };
+  const labels = [], data = [], colors = [], stds = [];
+
+  const addFamily = (fam, familyObj) => {
+    if (!familyObj) return;
+    if (familyObj.per_arch && Object.keys(familyObj.per_arch).length) {
+      Object.entries(familyObj.per_arch).forEach(([name, f1]) => {
+        labels.push(name); data.push(f1);
+        colors.push(ARCH_COLORS[ARCH_KEY[name]] || '#6b7799');
+        stds.push(null);
+      });
+    } else {
+      labels.push(fam === 'cnn' ? 'CNN' : 'RNN');
+      data.push(familyObj.mean);
+      colors.push(fam === 'cnn' ? ARCH_COLORS.mobilenet : ARCH_COLORS.lstm);
+      stds.push(familyObj.std);
+    }
+  };
+  addFamily('cnn', cnn);
+  addFamily('rnn', rnn);
   if (!labels.length) return;
+
   chartFamily = new Chart(canvas, {
     type:'bar',
     data:{ labels, datasets:[{data, backgroundColor:colors, borderWidth:0, borderRadius:4}] },
     options:{ responsive:true, maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{...TOOLTIP_DEFAULTS,callbacks:{
         label:(ctx)=>{
-          const family = ctx.dataIndex === 0 ? (cnn || rnn) : rnn;
-          return `${(ctx.raw*100).toFixed(1)}% ± ${(family.std*100).toFixed(1)}%`;
+          const std = stds[ctx.dataIndex];
+          return std != null
+            ? `${(ctx.raw*100).toFixed(1)}% ± ${(std*100).toFixed(1)}%`
+            : `${(ctx.raw*100).toFixed(1)}% F1`;
         }}}},
-      scales:{x:{...SCALE_DEFAULTS.x,ticks:{color:'#dde2f0',font:{size:12}}},
+      scales:{x:{...SCALE_DEFAULTS.x,ticks:{color:'#dde2f0',font:{size:10}}},
               y:{...SCALE_DEFAULTS.y,ticks:{color:'#6b7799',callback:v=>(v*100).toFixed(0)+'%'},min:0,max:1}} },
   });
 }
@@ -612,6 +665,274 @@ function renderPrediction(data) {
     grid.appendChild(card);
   });
 }
+
+/* ── Dumbbell chart (shared) ──────────────────────────────────────────────── */
+const ARCH_ORDER_DB = ['lstm','gru','bilstm','simplecnn','mobilenet','resnet'];
+
+// Tooltip for dumbbell canvas hit detection
+const _dbHitMap = new WeakMap();
+let   _dbTooltip = null;
+
+function getDbTooltip() {
+  if (!_dbTooltip) {
+    _dbTooltip = document.createElement('div');
+    Object.assign(_dbTooltip.style, {
+      position:'fixed', display:'none', pointerEvents:'none',
+      background:'#1a1a3a', border:'1px solid #2a2a50', borderRadius:'6px',
+      padding:'6px 10px', font:'11px Menlo,Consolas,monospace', color:'#dde2f0',
+      zIndex:'9999', whiteSpace:'nowrap', lineHeight:'1.6',
+    });
+    document.body.appendChild(_dbTooltip);
+  }
+  return _dbTooltip;
+}
+
+function attachDumbbellTooltip(canvasEl) {
+  if (!canvasEl || canvasEl._dbBound) return;
+  canvasEl._dbBound = true;
+  const tt = getDbTooltip();
+
+  canvasEl.addEventListener('mousemove', e => {
+    const pts  = _dbHitMap.get(canvasEl) || [];
+    const rect = canvasEl.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    let closest = null, minD = 14;
+    pts.forEach(p => { const d = Math.hypot(p.x - mx, p.y - my); if (d < minD) { minD = d; closest = p; } });
+    if (closest) {
+      const { arch, round, ts, bytes } = closest;
+      const fam  = ARCH_FAMILY[arch] ? ` (${ARCH_FAMILY[arch]})` : '';
+      const timeStr = ts >= 60000 ? `${(ts/60000).toFixed(2)}m` : ts >= 1000 ? `${(ts/1000).toFixed(2)}s` : `${Math.round(ts)}ms`;
+      const kbStr   = bytes >= 1048576 ? `${(bytes/1048576).toFixed(1)} MB` : `${(bytes/1024).toFixed(1)} KB`;
+      tt.innerHTML  = `<strong style="color:${ARCH_COLORS[arch]}">${arch.toUpperCase()}${fam}</strong><br>Round ${round} &middot; ${timeStr}<br>${kbStr}`;
+      tt.style.display = 'block';
+      tt.style.left    = (e.clientX + 14) + 'px';
+      tt.style.top     = (e.clientY - 10) + 'px';
+    } else {
+      tt.style.display = 'none';
+    }
+  });
+
+  canvasEl.addEventListener('mouseleave', () => { tt.style.display = 'none'; });
+}
+
+function drawDumbbellOnCanvas(canvasEl, sessionData) {
+  if (!canvasEl || !sessionData) return;
+
+  const wrap = canvasEl.parentElement;
+  const dpr  = window.devicePixelRatio || 1;
+  const W    = wrap.clientWidth  || 600;
+  const H    = wrap.clientHeight || 300;
+  canvasEl.width        = W * dpr;
+  canvasEl.height       = H * dpr;
+  canvasEl.style.width  = W + 'px';
+  canvasEl.style.height = H + 'px';
+
+  const ctx = canvasEl.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+
+  const allPoints = [];
+  let maxTs = 1000, maxBytes = 1;
+  const numRounds = sessionData.maxRound || 1;
+
+  ARCH_ORDER_DB.forEach(arch => {
+    const archRounds = sessionData.rounds[arch];
+    if (!archRounds) return;
+    Object.entries(archRounds).forEach(([r, { ts, bytes }]) => {
+      allPoints.push({ arch, round: parseInt(r, 10), ts, bytes });
+      if (ts    > maxTs)    maxTs    = ts;
+      if (bytes > maxBytes) maxBytes = bytes;
+    });
+  });
+
+  const pad      = { top: 30, right: 55, bottom: 52, left: 90 };
+  const pw       = W - pad.left - pad.right;
+  const ph       = H - pad.top  - pad.bottom;
+  const xScale   = t => pad.left + (t / maxTs) * pw;
+  const yScale   = r => pad.top  + ph - ((r - 0.5) / numRounds) * ph;
+  const MAX_DASH = Math.min(80, pw * 0.15);  // max total dash length
+
+  ctx.font = '10px Menlo, Consolas, monospace';
+
+  // Round gridlines + labels
+  for (let r = 1; r <= numRounds; r++) {
+    const y = yScale(r);
+    ctx.strokeStyle = '#1e1e40'; ctx.lineWidth = 1; ctx.setLineDash([3, 6]);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#6b7799'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(`Round ${r}`, pad.left - 8, y);
+  }
+
+  // X axis
+  ctx.strokeStyle = '#2a2a50'; ctx.lineWidth = 1; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(pad.left, pad.top + ph); ctx.lineTo(pad.left + pw, pad.top + ph); ctx.stroke();
+
+  // X ticks
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#6b7799';
+  for (let i = 0; i <= 5; i++) {
+    const t   = (maxTs / 5) * i;
+    const x   = xScale(t);
+    const lbl = t >= 60000 ? `${(t/60000).toFixed(1)}m` : t >= 1000 ? `${(t/1000).toFixed(1)}s` : `${Math.round(t)}ms`;
+    ctx.fillText(lbl, x, pad.top + ph + 7);
+    ctx.strokeStyle = '#2a2a50'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, pad.top + ph); ctx.lineTo(x, pad.top + ph + 4); ctx.stroke();
+  }
+
+  // X axis title
+  ctx.fillStyle = '#6b7799'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.font = '9px Menlo, Consolas, monospace';
+  ctx.fillText('← Time from session start (dot = round completion)', pad.left + pw / 2, H - 2);
+  ctx.font = '10px Menlo, Consolas, monospace';
+
+  // Y axis line
+  ctx.strokeStyle = '#2a2a50'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph); ctx.stroke();
+
+  if (!allPoints.length) {
+    ctx.fillStyle = '#6b7799'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('Waiting for round data…', W / 2, H / 2);
+    return;
+  }
+
+  // Dashes — dot at RIGHT tip = completion time, dash extends leftward ∝ bytes
+  const hitPoints = [];
+  allPoints.forEach(({ arch, round, ts, bytes }) => {
+    const archIdx = ARCH_ORDER_DB.indexOf(arch);
+    const spread  = (archIdx - (ARCH_ORDER_DB.length - 1) / 2) * 8;
+    const x       = xScale(ts);
+    const y       = yScale(round) + spread;
+    const dashLen = maxBytes > 0 ? Math.max(8, (bytes / maxBytes) * MAX_DASH) : 8;
+    const color   = ARCH_COLORS[arch] || '#888';
+
+    ctx.strokeStyle = color; ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(x - dashLen, y); ctx.lineTo(x, y); ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+
+    hitPoints.push({ x, y, arch, round, ts, bytes });
+  });
+  _dbHitMap.set(canvasEl, hitPoints);
+
+  const kbMax = (maxBytes / 1024).toFixed(0);
+  ctx.fillStyle = '#3a3a60'; ctx.font = '9px Menlo, Consolas, monospace';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+  ctx.fillText(`max dash = ${kbMax} KB`, pad.left + pw, pad.top - 2);
+}
+
+/* ── Train dumbbell ───────────────────────────────────────────────────────── */
+let dumbbellSessions   = {};
+let activeDumbbellSess = null;
+
+function clearDumbbell() {
+  dumbbellSessions   = {};
+  activeDumbbellSess = null;
+  const bar = $('#dumbbell-session-bar');
+  if (bar) bar.innerHTML = '';
+  const canvas = $('#dumbbell-canvas');
+  if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  const empty = $('#dumbbell-empty');
+  if (empty) empty.style.display = '';
+}
+
+function onTrainRoundEvent({ session, arch, round, timestamp, bytes }) {
+  if (!dumbbellSessions[session]) {
+    dumbbellSessions[session] = { rounds: {}, maxRound: 0 };
+    addTrainSessionTab(session);
+    if (activeDumbbellSess === null) switchTrainSession(session);
+  }
+  const s = dumbbellSessions[session];
+  if (!s.rounds[arch]) s.rounds[arch] = {};
+  s.rounds[arch][round] = { ts: timestamp, bytes };
+  if (round > s.maxRound) s.maxRound = round;
+  const empty = $('#dumbbell-empty');
+  if (empty) empty.style.display = 'none';
+  if (activeDumbbellSess === session) drawDumbbell();
+}
+
+function addTrainSessionTab(sessNum) {
+  const bar = $('#dumbbell-session-bar');
+  if (!bar || $(`#dsess-btn-${sessNum}`)) return;
+  const btn = document.createElement('button');
+  btn.className   = 'session-subtab';
+  btn.id          = `dsess-btn-${sessNum}`;
+  btn.textContent = `Session ${sessNum}`;
+  btn.addEventListener('click', () => switchTrainSession(sessNum));
+  bar.appendChild(btn);
+}
+
+function switchTrainSession(sessNum) {
+  activeDumbbellSess = sessNum;
+  $$('#dumbbell-session-bar .session-subtab').forEach(b =>
+    b.classList.toggle('active', b.id === `dsess-btn-${sessNum}`)
+  );
+  drawDumbbell();
+}
+
+function drawDumbbell() {
+  const c = $('#dumbbell-canvas');
+  drawDumbbellOnCanvas(c, activeDumbbellSess !== null ? dumbbellSessions[activeDumbbellSess] : null);
+  attachDumbbellTooltip(c);
+}
+
+/* ── Test dumbbell ────────────────────────────────────────────────────────── */
+let testDumbbellRuns  = {};  // persists across test runs — never cleared
+let activeTestRun     = null;
+let testRunCounter    = 0;
+let currentTestRunNum = null;
+
+function startNewTestRun() {
+  testRunCounter++;
+  currentTestRunNum = testRunCounter;
+  testDumbbellRuns[currentTestRunNum] = { rounds: {}, maxRound: 0 };
+  addTestRunTab(currentTestRunNum);
+  switchTestRun(currentTestRunNum);
+  const empty = $('#test-dumbbell-empty');
+  if (empty) empty.style.display = 'none';
+}
+
+function onTestRoundEvent({ arch, round, timestamp, bytes }) {
+  if (!currentTestRunNum) return;
+  const run = testDumbbellRuns[currentTestRunNum];
+  if (!run) return;
+  if (!run.rounds[arch]) run.rounds[arch] = {};
+  run.rounds[arch][round] = { ts: timestamp, bytes };
+  if (round > run.maxRound) run.maxRound = round;
+  if (activeTestRun === currentTestRunNum) drawTestDumbbell();
+}
+
+function addTestRunTab(runNum) {
+  const bar = $('#test-dumbbell-run-bar');
+  if (!bar || $(`#trun-btn-${runNum}`)) return;
+  const btn = document.createElement('button');
+  btn.className   = 'session-subtab';
+  btn.id          = `trun-btn-${runNum}`;
+  btn.textContent = `Run ${runNum}`;
+  btn.addEventListener('click', () => switchTestRun(runNum));
+  bar.appendChild(btn);
+}
+
+function switchTestRun(runNum) {
+  activeTestRun = runNum;
+  $$('#test-dumbbell-run-bar .session-subtab').forEach(b =>
+    b.classList.toggle('active', b.id === `trun-btn-${runNum}`)
+  );
+  drawTestDumbbell();
+}
+
+function drawTestDumbbell() {
+  const c = $('#test-dumbbell-canvas');
+  drawDumbbellOnCanvas(c, activeTestRun !== null ? testDumbbellRuns[activeTestRun] : null);
+  attachDumbbellTooltip(c);
+}
+
+/* ── Round event router ───────────────────────────────────────────────────── */
+window.lab.onRoundEvent(({ session, arch, round, timestamp, bytes, phase }) => {
+  if (phase === 'test') onTestRoundEvent({ arch, round, timestamp, bytes });
+  else                  onTrainRoundEvent({ session, arch, round, timestamp, bytes });
+});
 
 /* ── Init: load model info on startup ─────────────────────────────────────── */
 refreshModelInfoCard();

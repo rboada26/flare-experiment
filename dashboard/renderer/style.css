@@ -869,6 +869,235 @@ body {
   background: rgba(0,0,0,0.2);
 }
 
+
+/* ── Dumbbell tab ───────────────────────────────────────────────────────── */
+.dumbbell-tab {
+  overflow: hidden;
+}
+
+.dumbbell-card {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dumbbell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.session-subtab-bar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.session-subtab {
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  color: var(--muted);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.session-subtab:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.session-subtab.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(0,212,170,0.12);
+  font-weight: 600;
+}
+
+.dumbbell-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+#dumbbell-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dumbbell-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.dumbbell-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid var(--card-border);
+}
+
+.db-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.db-dash {
+  display: inline-block;
+  width: 20px;
+  height: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+
+.db-legend-note {
+  font-size: 9px;
+  color: #3a3a60;
+  margin-left: auto;
+  font-family: var(--font-mono);
+}
+
+/* ── Live combined tab (bar chart + dumbbell stacked) ───────────────────── */
+.tab-content.live-combined {
+  overflow: hidden;
+  padding: 10px;
+  gap: 10px;
+}
+
+.live-combined .captures-card {
+  flex: 0 0 195px;
+  min-height: 0;
+}
+
+.live-combined .dumbbell-card {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Info panel ─────────────────────────────────────────────────────────── */
+.info-panel {
+  padding: 0;
+  gap: 0;
+}
+
+.info-section {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.info-section-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.info-body {
+  font-size: 11px;
+  color: #b0b8d0;
+  line-height: 1.55;
+}
+
+.info-arch-card {
+  border-left: 2px solid var(--ac, var(--accent));
+  padding: 6px 0 6px 10px;
+  margin-bottom: 8px;
+}
+
+.info-arch-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ac, var(--accent));
+  letter-spacing: 0.3px;
+}
+
+.info-fam {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.info-arch-full {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 3px;
+  font-style: italic;
+}
+
+.info-arch-body {
+  font-size: 10.5px;
+  color: #8896b8;
+  line-height: 1.4;
+}
+
+.info-vuln {
+  background: rgba(239,68,68,0.04);
+  border-bottom: none;
+}
+
+.info-vuln .info-section-title {
+  color: #f87171;
+}
+
+.info-threat {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.info-threat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 2px solid #4a1c1c;
+}
+
+.info-threat-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #f87171;
+  letter-spacing: 0.2px;
+}
+
+.info-threat-body {
+  font-size: 10px;
+  color: #8896b8;
+  line-height: 1.4;
+}
+
+.info-footer {
+  margin-top: 10px;
+  font-size: 10.5px;
+  color: #8896b8;
+  line-height: 1.5;
+  border-top: 1px solid #2a1a1a;
+  padding-top: 8px;
+}
+
 /* ── Responsive fallback ────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .metric-cards { grid-template-columns: repeat(2, 1fr); }

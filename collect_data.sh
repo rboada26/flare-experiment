@@ -27,22 +27,38 @@ echo "============================================"
 echo " PARTNER-LAB Data Collection"
 echo " Sessions : $NUM_SESSIONS"
 echo " FL Rounds: $NUM_ROUNDS"
+echo " Mode     : all 6 architectures concurrent"
 echo "============================================"
 echo ""
 
-# Write .env so docker compose picks up NUM_ROUNDS
 printf "NUM_ROUNDS=%d\n" "$NUM_ROUNDS" > .env
 echo "[init] Written .env with NUM_ROUNDS=$NUM_ROUNDS"
 
-# Build the tcpdump capture image (fast — alpine base, cached after first build)
-echo "[init] Building tcpdump capture image..."
-docker build -q -t partner-lab-tcpdump ./tcpdump
+if docker image inspect partner-lab-tcpdump &>/dev/null; then
+    echo "[init] tcpdump image already exists, skipping build."
+else
+    echo "[init] Building tcpdump capture image..."
+    docker build -q -t partner-lab-tcpdump ./tcpdump
+fi
 echo "[init] tcpdump image ready."
+
+echo "[init] Building FL server images..."
+docker compose build simplecnn_server resnet_server mobilenet_server \
+    gru_server lstm_server bilstm_server --quiet 2>&1 || true
+echo "[init] FL server images ready."
+
+echo "[init] Building FL client images..."
+docker compose build simplecnn_client simplecnn_client2 \
+    resnet_client resnet_client2 \
+    mobilenet_client mobilenet_client2 \
+    gru_client gru_client2 \
+    lstm_client lstm_client2 \
+    bilstm_client bilstm_client2 --quiet 2>&1 || true
+echo "[init] FL client images ready."
 
 ALL_ARCHITECTURES=(simplecnn resnet mobilenet gru lstm bilstm)
 ALL_SUBNETS=(172.20.0 172.20.1 172.20.2 172.21.0 172.21.1 172.21.2)
 
-# Filter to selected architectures (or use all if none specified)
 ARCHITECTURES=()
 SUBNETS=()
 if [[ -n "$ARCH_FILTER" ]]; then
@@ -62,28 +78,6 @@ else
     SUBNETS=("${ALL_SUBNETS[@]}")
 fi
 
-echo " Architectures: ${ARCHITECTURES[*]}"
-
-wait_for_all_clients() {
-    echo "  [wait] Polling for training completion..."
-    while true; do
-        all_done=true
-        status_line=""
-        for arch in "${ARCHITECTURES[@]}"; do
-            s1=$(docker inspect -f '{{.State.Status}}' "fl_${arch}_client"  2>/dev/null || echo "gone")
-            s2=$(docker inspect -f '{{.State.Status}}' "fl_${arch}_client2" 2>/dev/null || echo "gone")
-            status_line+="${arch}:${s1}/${s2} "
-            if [[ "$s1" != "exited" && "$s1" != "gone" ]] || \
-               [[ "$s2" != "exited" && "$s2" != "gone" ]]; then
-                all_done=false
-            fi
-        done
-        echo "  [status] $status_line"
-        $all_done && { echo "  [wait] All clients finished."; break; }
-        sleep 5
-    done
-}
-
 mkdir -p captures
 
 for i in $(seq 1 "$NUM_SESSIONS"); do
@@ -92,73 +86,83 @@ for i in $(seq 1 "$NUM_SESSIONS"); do
     echo " Starting session $i / $NUM_SESSIONS"
     echo "============================================"
 
-    # Tear down any leftovers
     docker compose down --remove-orphans 2>/dev/null || true
-    # Remove any stale capture containers from a previous interrupted run
-    for arch in "${ARCHITECTURES[@]}"; do
-        docker rm -f "cap_${arch}_${i}" &>/dev/null || true
-    done
     sleep 2
 
-    # Start FL servers (only selected architectures)
-    echo "  [session $i] Starting FL servers..."
-    SERVERS=()
-    for arch in "${ARCHITECTURES[@]}"; do SERVERS+=("${arch}_server"); done
-    docker compose up -d "${SERVERS[@]}"
+    # Force-remove any stale containers before starting
+    for arch in "${ARCHITECTURES[@]}"; do
+        docker rm -f "fl_${arch}_server" "fl_${arch}_client" "fl_${arch}_client2" \
+            "cap_${arch}_${i}" &>/dev/null || true
+    done
 
-    echo "  [session $i] Waiting 10s for servers to be ready..."
-    sleep 10
+    # Start all servers
+    for arch in "${ARCHITECTURES[@]}"; do
+        docker compose up -d "${arch}_server" 2>&1 | grep -v "^$" || true
+    done
+    sleep 8
 
-    # Start a tcpdump container sharing each server's network namespace.
-    # --network container:<server> means we share the server's eth0 —
-    # the server is party to every FL exchange, so we capture all gradient traffic.
-    # BPF subnet filter excludes internet noise (dataset downloads, etc.).
-    CAP_NAMES=()
+    # Start tcpdump for each arch
     for idx in "${!ARCHITECTURES[@]}"; do
         arch="${ARCHITECTURES[$idx]}"
         subnet="${SUBNETS[$idx]}"
         pcap_name="session${i}_${arch}_$(date +%Y%m%d_%H%M%S).pcap"
-        cap_name="cap_${arch}_${i}"
-
         if docker run --rm -d \
             --network "container:fl_${arch}_server" \
-            --name "$cap_name" \
+            --name "cap_${arch}_${i}" \
             -v "$(pwd)/captures:/out" \
             partner-lab-tcpdump \
             -i eth0 -w "/out/${pcap_name}" -s0 "net ${subnet}.0/24" \
             &>/dev/null; then
-            echo "  [tcpdump] ${arch} → container:fl_${arch}_server → captures/${pcap_name}"
-        else
-            echo "  [warn] Could not start tcpdump container for ${arch}"
+            echo "  [tcpdump] ${arch} → captures/${pcap_name}"
         fi
-        CAP_NAMES+=("$cap_name")
         sleep 0.3
     done
-
     sleep 2
 
-    # Start all clients (only selected architectures)
-    echo "  [session $i] Starting FL clients..."
-    CLIENTS=()
-    for arch in "${ARCHITECTURES[@]}"; do CLIENTS+=("${arch}_client" "${arch}_client2"); done
-    docker compose up -d "${CLIENTS[@]}"
+    # Start all clients
+    for arch in "${ARCHITECTURES[@]}"; do
+        docker compose up -d "${arch}_client" "${arch}_client2" 2>&1 | grep -v "^$" || true
+    done
 
-    # Wait for all 12 client containers to exit
-    wait_for_all_clients
-
+    # Wait for all clients to finish
+    echo "  Waiting for all clients to finish..."
+    while true; do
+        all_done=true
+        for arch in "${ARCHITECTURES[@]}"; do
+            s1=$(docker inspect -f '{{.State.Status}}' "fl_${arch}_client"  2>/dev/null || echo "gone")
+            s2=$(docker inspect -f '{{.State.Status}}' "fl_${arch}_client2" 2>/dev/null || echo "gone")
+            if [[ ( "$s1" != "exited" && "$s1" != "gone" ) || \
+                  ( "$s2" != "exited" && "$s2" != "gone" ) ]]; then
+                all_done=false; break
+            fi
+        done
+        $all_done && break
+        sleep 5
+    done
     sleep 3
 
-    # Stop tcpdump containers (docker stop flushes the pcap buffer cleanly)
-    echo "  [session $i] Stopping capture containers..."
-    for cap_name in "${CAP_NAMES[@]}"; do
-        docker stop "$cap_name" &>/dev/null || true
+    # Stop tcpdumps
+    for arch in "${ARCHITECTURES[@]}"; do
+        docker stop "cap_${arch}_${i}" &>/dev/null || true
     done
     sleep 1
 
-    # Tear down compose
-    docker compose down --remove-orphans
-    sleep 3
+    # Save logs before teardown
+    mkdir -p debug
+    for arch in "${ARCHITECTURES[@]}"; do
+        for role in server client client2; do
+            docker logs "fl_${arch}_${role}" > "debug/session${i}_${arch}_${role}.log" 2>&1 || true
+        done
+    done
 
+    # Tear down using direct docker commands to avoid compose state issues
+    for arch in "${ARCHITECTURES[@]}"; do
+        docker stop "fl_${arch}_server" "fl_${arch}_client" "fl_${arch}_client2" &>/dev/null || true
+        docker rm   "fl_${arch}_server" "fl_${arch}_client" "fl_${arch}_client2" &>/dev/null || true
+    done
+    sleep 1
+
+    echo ""
     echo "  [session $i] Done. Captures:"
     ls -lh "captures/session${i}_"*.pcap 2>/dev/null | awk '{print "    " $5, $9}' \
         || echo "    (no pcaps found)"

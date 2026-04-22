@@ -7,21 +7,22 @@ from torch.utils.data import DataLoader, Subset
 from collections import OrderedDict
 
 transform = transforms.Compose([
-    transforms.Resize(224),
     transforms.ToTensor(),
-    transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5))
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
 full_train = torchvision.datasets.CIFAR10("./data", train=True,  download=True, transform=transform)
 full_test  = torchvision.datasets.CIFAR10("./data", train=False, download=True, transform=transform)
-trainset   = Subset(full_train, range(500))
-testset    = Subset(full_test,  range(100))
-trainloader = DataLoader(trainset, batch_size=64, shuffle=True)
-testloader  = DataLoader(testset,  batch_size=64)
+trainset    = Subset(full_train, range(50))
+testset     = Subset(full_test,  range(20))
+trainloader = DataLoader(trainset, batch_size=32, shuffle=True)
+testloader  = DataLoader(testset,  batch_size=32)
 
 device = torch.device("cpu")
 model  = torchvision.models.mobilenet_v2(weights=None)
-model.classifier[1] = nn.Linear(1280, 10)
-model  = model.to(device)
+# Replace first conv: stride 2→1 so 32×32 CIFAR images don't collapse to 1×1 feature maps
+model.features[0][0] = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1, bias=False)
+model.classifier[1]  = nn.Linear(1280, 10)
+model = model.to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
@@ -57,6 +58,6 @@ if __name__ == "__main__":
     import os, time
     time.sleep(8)
     fl.client.start_client(
-        server_address=f"{os.environ.get('FL_SERVER_ADDR','mobilenet_server')}:8080",
+        server_address=f"{os.environ.get('FL_SERVER_ADDR', 'mobilenet_server')}:8080",
         client=MobileNetClient().to_client(),
     )

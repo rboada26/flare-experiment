@@ -23,6 +23,7 @@
   <div class="phase-tabs">
     <button class="phase-tab active" data-phase="train">Train</button>
     <button class="phase-tab"        data-phase="test">Test</button>
+    <button class="phase-tab"        data-phase="info">Info</button>
   </div>
 
   <!-- ── TRAIN phase ─────────────────────────────────────────────────────── -->
@@ -46,7 +47,6 @@
         <button class="pill" data-value="4">4</button>
         <button class="pill active" data-value="8">8</button>
         <button class="pill" data-value="16">16</button>
-
       </div>
     </div>
 
@@ -91,12 +91,12 @@
     <div class="sidebar-section">
       <div class="section-label">ARCHITECTURES TO TRAIN</div>
       <div class="arch-toggle-group" id="train-arch-toggles">
-        <button class="arch-toggle active" data-arch="simplecnn" style="--c:#00d4aa">SimpleCNN</button>
-        <button class="arch-toggle active" data-arch="resnet"    style="--c:#818cf8">ResNet18</button>
-        <button class="arch-toggle active" data-arch="mobilenet" style="--c:#f59e0b">MobileNet</button>
-        <button class="arch-toggle active" data-arch="gru"       style="--c:#f472b6">GRU</button>
-        <button class="arch-toggle active" data-arch="lstm"      style="--c:#60a5fa">LSTM</button>
-        <button class="arch-toggle active" data-arch="bilstm"    style="--c:#34d399">BiLSTM</button>
+        <button class="arch-toggle active" data-arch="lstm"      style="--c:#60a5fa">LSTM (r)</button>
+        <button class="arch-toggle active" data-arch="gru"       style="--c:#f472b6">GRU (r)</button>
+        <button class="arch-toggle active" data-arch="bilstm"    style="--c:#34d399">BiLSTM (r)</button>
+        <button class="arch-toggle active" data-arch="simplecnn" style="--c:#94a3b8">SimpleCNN (c)</button>
+        <button class="arch-toggle active" data-arch="mobilenet" style="--c:#fb923c">MobileNet (c)</button>
+        <button class="arch-toggle active" data-arch="resnet"    style="--c:#a78bfa">ResNet18 (c)</button>
       </div>
     </div>
 
@@ -128,12 +128,12 @@
     <div class="sidebar-section">
       <div class="section-label">ARCHITECTURES TO TEST</div>
       <div class="arch-toggle-group" id="arch-toggles">
-        <button class="arch-toggle active" data-arch="simplecnn" style="--c:#00d4aa">SimpleCNN</button>
-        <button class="arch-toggle active" data-arch="resnet"    style="--c:#818cf8">ResNet18</button>
-        <button class="arch-toggle active" data-arch="mobilenet" style="--c:#f59e0b">MobileNet</button>
-        <button class="arch-toggle active" data-arch="gru"       style="--c:#f472b6">GRU</button>
-        <button class="arch-toggle active" data-arch="lstm"      style="--c:#60a5fa">LSTM</button>
-        <button class="arch-toggle active" data-arch="bilstm"    style="--c:#34d399">BiLSTM</button>
+        <button class="arch-toggle active" data-arch="lstm"      style="--c:#60a5fa">LSTM (r)</button>
+        <button class="arch-toggle active" data-arch="gru"       style="--c:#f472b6">GRU (r)</button>
+        <button class="arch-toggle active" data-arch="bilstm"    style="--c:#34d399">BiLSTM (r)</button>
+        <button class="arch-toggle active" data-arch="simplecnn" style="--c:#94a3b8">SimpleCNN (c)</button>
+        <button class="arch-toggle active" data-arch="mobilenet" style="--c:#fb923c">MobileNet (c)</button>
+        <button class="arch-toggle active" data-arch="resnet"    style="--c:#a78bfa">ResNet18 (c)</button>
       </div>
     </div>
 
@@ -162,6 +162,86 @@
 
   </div><!-- /phase-test -->
 
+  <!-- ── INFO phase ──────────────────────────────────────────────────────── -->
+  <div id="phase-info" class="phase-content hidden info-panel">
+
+    <div class="info-section">
+      <div class="info-section-title">ABOUT</div>
+      <p class="info-body">PARTNER-LAB captures network traffic from 6 federated learning (FL) architectures and trains a Random Forest to fingerprint each one from packet metadata alone.</p>
+    </div>
+
+    <div class="info-section">
+      <div class="info-section-title">CLASSES &amp; ARCHITECTURES</div>
+
+      <div class="info-arch-card" style="--ac:#60a5fa">
+        <div class="info-arch-name">LSTM <span class="info-fam">(r)</span></div>
+        <div class="info-arch-full">Long Short-Term Memory</div>
+        <div class="info-arch-body">Gated memory cells capture long-range temporal dependencies. FL use: health monitoring, sensor fusion.</div>
+      </div>
+
+      <div class="info-arch-card" style="--ac:#f472b6">
+        <div class="info-arch-name">GRU <span class="info-fam">(r)</span></div>
+        <div class="info-arch-full">Gated Recurrent Unit</div>
+        <div class="info-arch-body">Efficient LSTM variant — fewer parameters, no separate output gate. FL use: edge NLP, lightweight sequences.</div>
+      </div>
+
+      <div class="info-arch-card" style="--ac:#34d399">
+        <div class="info-arch-name">BiLSTM <span class="info-fam">(r)</span></div>
+        <div class="info-arch-full">Bidirectional LSTM</div>
+        <div class="info-arch-body">Processes sequences in both directions for richer context. FL use: medical time-series, speech recognition.</div>
+      </div>
+
+      <div class="info-arch-card" style="--ac:#94a3b8">
+        <div class="info-arch-name">SimpleCNN <span class="info-fam">(c)</span></div>
+        <div class="info-arch-full">3-Layer Convolutional Network</div>
+        <div class="info-arch-body">Lightweight baseline CNN for image classification. FL use: image triage, quality inspection.</div>
+      </div>
+
+      <div class="info-arch-card" style="--ac:#fb923c">
+        <div class="info-arch-name">MobileNet <span class="info-fam">(c)</span></div>
+        <div class="info-arch-full">MobileNetV2</div>
+        <div class="info-arch-body">Depthwise-separable convolutions for mobile/edge deployment. FL use: on-device vision, mobile inference.</div>
+      </div>
+
+      <div class="info-arch-card" style="--ac:#a78bfa">
+        <div class="info-arch-name">ResNet-18 <span class="info-fam">(c)</span></div>
+        <div class="info-arch-full">Residual Network</div>
+        <div class="info-arch-body">Skip connections enable deep training without vanishing gradients. FL use: medical imaging, robust visual recognition.</div>
+      </div>
+    </div>
+
+    <div class="info-section">
+      <div class="info-section-title">TRAINING DATASET</div>
+      <p class="info-body"><strong style="color:var(--accent)">CIFAR-10</strong> — 60,000 colour images (32×32) across 10 classes: plane, car, bird, cat, deer, dog, frog, horse, ship, truck.</p>
+      <p class="info-body" style="margin-top:6px">Using a neutral dataset ensures fingerprints reflect <em>architecture</em> differences, not dataset complexity.</p>
+    </div>
+
+    <div class="info-section info-vuln">
+      <div class="info-section-title">&#9888; WHY THIS IS A VULNERABILITY</div>
+      <p class="info-body">Even with TLS encryption, FL coordination traffic carries measurable side-channel information:</p>
+      <div class="info-threat">
+        <div class="info-threat-item">
+          <span class="info-threat-label">Architecture Disclosure</span>
+          <span class="info-threat-body">Traffic timing and volume reveal whether an org trains CNNs or RNNs — exposing proprietary R&amp;D direction.</span>
+        </div>
+        <div class="info-threat-item">
+          <span class="info-threat-label">Gradient Leakage</span>
+          <span class="info-threat-body">Knowing the architecture is a prerequisite for model-inversion and gradient inference attacks.</span>
+        </div>
+        <div class="info-threat-item">
+          <span class="info-threat-label">Targeted Poisoning</span>
+          <span class="info-threat-body">Architecture-specific backdoors become viable once an adversary identifies the model type from network traffic alone.</span>
+        </div>
+        <div class="info-threat-item">
+          <span class="info-threat-label">Competitive Intel</span>
+          <span class="info-threat-body">In healthcare and finance, knowing a competitor's model family leaks strategic intent.</span>
+        </div>
+      </div>
+      <p class="info-footer">FLARE achieves <strong style="color:var(--accent)">97.7% F1</strong> using only packet-size windows — motivating traffic obfuscation, timing jitter, and dummy-packet injection as defenses.</p>
+    </div>
+
+  </div><!-- /phase-info -->
+
 </aside>
 
 <!-- ── Main ──────────────────────────────────────────────────────────────── -->
@@ -180,20 +260,71 @@
   <div id="viz-panel">
 
     <div class="tab-bar">
-      <button class="tab-btn active" data-tab="live">Live Captures</button>
+      <button class="tab-btn active" data-tab="live-train">Live Training</button>
+      <button class="tab-btn"        data-tab="live-test">Live Testing</button>
       <button class="tab-btn"        data-tab="results">Results</button>
       <button class="tab-btn"        data-tab="prediction">Prediction</button>
     </div>
 
-    <!-- Live tab -->
-    <div id="tab-live" class="tab-content active">
-      <div class="chart-card full-width">
-        <div class="chart-card-title">PCAP File Sizes (bytes)</div>
-        <div class="chart-wrap"><canvas id="chart-captures"></canvas></div>
+    <!-- Live Training tab: captures bar + train dumbbell -->
+    <div id="tab-live-train" class="tab-content live-combined active">
+      <div class="chart-card captures-card">
+        <div class="chart-card-title">PCAP File Sizes — Training</div>
+        <div class="chart-wrap"><canvas id="chart-captures-train"></canvas></div>
+      </div>
+      <div class="chart-card dumbbell-card">
+        <div class="dumbbell-header">
+          <span class="chart-card-title">Round Timing &amp; Data Volume</span>
+          <div id="dumbbell-session-bar" class="session-subtab-bar"></div>
+        </div>
+        <div class="dumbbell-wrap">
+          <canvas id="dumbbell-canvas"></canvas>
+          <div id="dumbbell-empty" class="dumbbell-empty">
+            Run a <strong>Train</strong> to see round data here.
+          </div>
+        </div>
+        <div class="dumbbell-legend">
+          <div class="db-legend-item"><span class="db-dash" style="background:#60a5fa"></span>LSTM (r)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#f472b6"></span>GRU (r)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#34d399"></span>BiLSTM (r)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#94a3b8"></span>SimpleCNN (c)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#fb923c"></span>MobileNet (c)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#a78bfa"></span>ResNet18 (c)</div>
+          <span class="db-legend-note">● = round completion · dash width ∝ bytes transferred</span>
+        </div>
       </div>
     </div>
 
-    <!-- Results tab (train) -->
+    <!-- Live Testing tab: captures bar + test dumbbell -->
+    <div id="tab-live-test" class="tab-content live-combined">
+      <div class="chart-card captures-card">
+        <div class="chart-card-title">PCAP File Sizes — Testing</div>
+        <div class="chart-wrap"><canvas id="chart-captures-test"></canvas></div>
+      </div>
+      <div class="chart-card dumbbell-card">
+        <div class="dumbbell-header">
+          <span class="chart-card-title">Test Round Timing &amp; Data Volume</span>
+          <div id="test-dumbbell-run-bar" class="session-subtab-bar"></div>
+        </div>
+        <div class="dumbbell-wrap">
+          <canvas id="test-dumbbell-canvas"></canvas>
+          <div id="test-dumbbell-empty" class="dumbbell-empty">
+            Run a <strong>Blind Test</strong> to see round data here.
+          </div>
+        </div>
+        <div class="dumbbell-legend">
+          <div class="db-legend-item"><span class="db-dash" style="background:#60a5fa"></span>LSTM (r)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#f472b6"></span>GRU (r)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#34d399"></span>BiLSTM (r)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#94a3b8"></span>SimpleCNN (c)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#fb923c"></span>MobileNet (c)</div>
+          <div class="db-legend-item"><span class="db-dash" style="background:#a78bfa"></span>ResNet18 (c)</div>
+          <span class="db-legend-note">Each run tab preserved · Dot = completion · Dash width = PCAP bytes/round</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results tab -->
     <div id="tab-results" class="tab-content">
       <div class="metric-cards">
         <div class="metric-card">
@@ -235,7 +366,7 @@
       </div>
     </div>
 
-    <!-- Prediction tab (test) -->
+    <!-- Prediction tab -->
     <div id="tab-prediction" class="tab-content">
       <div id="pred-model-row" class="pred-model-row hidden"></div>
       <div id="pred-overall-row" class="pred-overall-row hidden"></div>
