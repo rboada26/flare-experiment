@@ -24,7 +24,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "============================================"
-echo " PARTNER-LAB Data Collection"
+echo " ext-FLARE-lab Data Collection"
 echo " Sessions : $NUM_SESSIONS"
 echo " FL Rounds: $NUM_ROUNDS"
 echo " Mode     : all 6 architectures concurrent"
@@ -48,7 +48,7 @@ docker compose build simplecnn_server resnet_server mobilenet_server \
 echo "[init] FL server images ready."
 
 echo "[init] Building FL client images..."
-docker compose build simplecnn_client simplecnn_client2 \
+docker compose build --no-deps simplecnn_client simplecnn_client2 \
     resnet_client resnet_client2 \
     mobilenet_client mobilenet_client2 \
     gru_client gru_client2 \

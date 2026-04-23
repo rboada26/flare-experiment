@@ -1,7 +1,7 @@
 {
-  "name": "partner-lab-dashboard",
+  "name": "ext-flare-lab-dashboard",
   "version": "1.0.0",
-  "description": "PARTNER-LAB Fine-Grained Fingerprinting Dashboard",
+  "description": "ext-FLARE-lab Fine-Grained Fingerprinting Dashboard",
   "main": "main.js",
   "scripts": { "start": "electron ." },
   "dependencies": { "chart.js": "^4.4.0" },

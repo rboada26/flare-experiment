@@ -33,7 +33,7 @@ function createWindow() {
       nodeIntegration: false,
     },
     titleBarStyle: 'hiddenInset',
-    title: 'PARTNER-LAB Dashboard',
+    title: 'ext-FLARE-lab Dashboard',
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
@@ -265,7 +265,7 @@ ipcMain.handle('start-train', async (_e, params) => {
   experimentPhase   = 'train';
 
   log('╔══════════════════════════════════════════════════════════╗');
-  log('║            PARTNER-LAB  ·  Train Phase                  ║');
+  log('║            ext-FLARE-lab  ·  Train Phase                  ║');
   log('╠══════════════════════════════════════════════════════════╣');
   log(`║  Sessions   : ${String(sessions).padEnd(42)}║`);
   log(`║  FL Rounds  : ${String(rounds).padEnd(42)}║`);
@@ -347,7 +347,7 @@ ipcMain.handle('start-test', async (_e, params) => {
   const { window, minPackets, minSize = 0 } = modelInfo;
 
   log('╔══════════════════════════════════════════════════════════╗');
-  log('║            PARTNER-LAB  ·  Test Phase                   ║');
+  log('║            ext-FLARE-lab  ·  Test Phase                   ║');
   log('╠══════════════════════════════════════════════════════════╣');
   log(`║  FL Rounds  : ${String(rounds).padEnd(42)}║`);
   log(`║  Window     : ${String(window + 's  (locked — from training)').padEnd(42)}║`);

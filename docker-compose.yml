@@ -85,7 +85,8 @@ services:
   resnet_server:
     build: ./server
     container_name: fl_resnet_server
-    <<: *server-resources
+    mem_limit: 2g
+    memswap_limit: 2g
     networks:
       resnet_network:
         ipv4_address: 172.20.1.10
