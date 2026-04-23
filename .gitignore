@@ -62,6 +62,22 @@ build/
 *.sublime-project
 *.sublime-workspace
 
+# ── Local research & planning notes (host-specific, not for repo) ─────────────
+backlog.md
+obfuscation_research.txt
+notes.txt
+notes.md
+scratch.md
+scratch.txt
+TODO.md
+TODO.txt
+
+# ── Host-specific capture metadata & runtime state ────────────────────────────
+.env.local
+capture_index.json
+session_meta.json
+*.session
+
 # ── OS noise ──────────────────────────────────────────────────────────────────
 .DS_Store
 .DS_Store?

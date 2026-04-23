@@ -6,4 +6,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY uci_har.py .
 RUN python -c "from uci_har import load_uci_har; load_uci_har()"
 COPY lstm_client/client.py .
+COPY mist_proxy.py .
 CMD ["python", "client.py"]

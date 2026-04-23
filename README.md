@@ -9,6 +9,30 @@ but specific architectures within each family.
 
 ---
 
+## Protocol Defense Experiment — MIST
+
+This branch extends the lab with a proposed network-level defense called
+**MIST** (Masking via Interleaved Scheduled Transmissions). MIST belongs
+to the Traffic Flow Confidentiality (TFC) family of defenses: it interposes
+a bidirectional proxy between each FL client and server that reshapes all
+traffic into a constant-rate, fixed-size stream, injecting cryptographically
+random decoy packets whenever the application has nothing to send.
+
+The goal is to defeat FLARE by eliminating the two signals it exploits:
+packet size variation (which leaks model parameter count) and inter-arrival
+timing (which leaks round boundaries and training duration).
+
+The interactive dashboard includes an **Eavesdropper View** that lets you
+run a live test session with MIST enabled and see in real time what the
+attacker observes on the wire — packet size distributions, cumulative PCAP
+sizes per architecture, coefficient of variation, and whether any
+architecture remains distinguishable.
+
+For a full technical description of the protocol, its wire format, and the
+proxy architecture, see [MIST.md](MIST.md).
+
+---
+
 ## Key Results
 
 | Task | Variant | F1 Score |

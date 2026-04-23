@@ -5,7 +5,7 @@ const PRESETS = {
   quick:    { sessions: 2,  rounds: 3,  window: 15,  minPackets: 25, trees: 50,  minSize: 0  },
   balanced: { sessions: 4,  rounds: 5,  window: 30,  minPackets: 50, trees: 100, minSize: 0  },
   full:     { sessions: 8,  rounds: 5,  window: 30,  minPackets: 50, trees: 200, minSize: 0  },
-  paper:    { sessions: 16, rounds: 5,  window: 300, minPackets: 50, trees: 200, minSize: 66 },
+  paper:    { sessions: 16, rounds: 5,  window: 60,  minPackets: 50, trees: 200, minSize: 66 },
 };
 
 const ARCH_COLORS = {
@@ -20,7 +20,14 @@ const ARCH_FAMILY = { lstm:'r', gru:'r', bilstm:'r', simplecnn:'c', mobilenet:'c
 
 /* ── Chart instances ──────────────────────────────────────────────────────── */
 let chartCapturesTrain = null, chartCapturesTest = null,
-    chartF1Variants = null, chartImportance = null, chartFamily = null;
+    chartF1Variants = null, chartImportance = null, chartFamily = null,
+    chartAttackerRate = null, chartEavBox = null, chartEavSizes = null;
+
+/* ── Attacker-view rate tracking ──────────────────────────────────────────── */
+let prevCapSizes = {};   // arch → cumulative bytes at last poll
+let prevCapTime  = null; // ms timestamp of last poll
+let archRateMap  = {};   // arch → smoothed bytes/sec
+let boxStatsMap  = {};   // arch → {min,q1,median,q3,max,mean,count}
 
 // tracks whether the live tab showing is train or test
 let livePhase = 'train';
@@ -83,6 +90,49 @@ $$('.preset-btn').forEach(btn => {
     currentMinSize = p.minSize || 0;
   });
 });
+
+/* ── Train CV feasibility estimate ───────────────────────────────────────── */
+function updateTrainCvEstimate() {
+  const el = $('#train-cv-estimate');
+  if (!el) return;
+
+  const sessions = getParam('sessions')   || 2;
+  const rounds   = getParam('rounds')     || 5;
+  const window   = getParam('window')     || 30;
+
+  // Lower-bound estimate: RNN rounds take ~20-30 s on the tiny dataset.
+  // windows_per_round ≈ round_duration / window, conservatively 20 s / window.
+  // We clamp to [0.1, 1] so large windows don't go completely to zero.
+  const winPerRound = Math.min(1, Math.max(0.1, 20 / window));
+  const est = Math.floor(sessions * rounds * winPerRound);
+
+  let cls, icon, msg;
+  if (est >= 10) {
+    cls  = 'ok';
+    icon = '✓';
+    msg  = `~${est} windows/class — good for 5-fold CV`;
+  } else if (est >= 5) {
+    cls  = 'warn';
+    icon = '⚠';
+    msg  = `~${est} windows/class — marginal; add sessions`;
+  } else {
+    cls  = 'danger';
+    icon = '✗';
+    msg  = `~${est} windows/class — too few for 5-fold CV`;
+  }
+
+  el.className   = `train-cv-estimate ${cls}`;
+  el.innerHTML   = `<span class="tcv-icon">${icon}</span><span class="tcv-msg">${msg}</span>`;
+}
+
+// Re-run whenever sessions, rounds, or window changes
+['sessions', 'rounds', 'window'].forEach(id => {
+  $(`#pills-${id}`)?.addEventListener('click', updateTrainCvEstimate);
+});
+// Also re-run when a preset button is clicked (they change all three at once)
+$$('.preset-btn').forEach(btn => btn.addEventListener('click', updateTrainCvEstimate));
+
+updateTrainCvEstimate();  // initialise on load
 
 /* ── Arch toggles (multi-select, both phases) ─────────────────────────────── */
 function wireArchToggleGroup(groupId) {
@@ -165,7 +215,10 @@ function setStatus(state) {
     el.className = `status-badge status-${state}`;
     el.textContent = LABELS[state] || state;
   });
-  if (state === 'done') playDoneChime();
+  if (state === 'done') {
+    playDoneChime();
+    if (currentPhase === 'train') showSaveModelPrompt();
+  }
 }
 
 /* ── Session steps ────────────────────────────────────────────────────────── */
@@ -201,17 +254,20 @@ async function refreshModelInfoCard() {
 }
 
 function renderModelInfoCard(info) {
-  const card   = $('#model-info-card');
-  const locked = $('#locked-params');
+  const card    = $('#model-info-card');
+  const locked  = $('#locked-params');
   const btnTest = $('#btn-test');
+  const btnExport = $('#btn-export-model');
   if (!card) return;
 
   if (!info || !info.exists) {
     card.innerHTML = '<div class="model-info-none">No trained model.<br>Run Train phase first.</div>';
-    if (locked) locked.textContent = '—';
+    if (locked)  locked.textContent = '—';
     if (btnTest) btnTest.disabled = true;
+    if (btnExport) btnExport.disabled = true;
     return;
   }
+  if (btnExport) btnExport.disabled = false;
 
   const date = info.trainedAt ? new Date(info.trainedAt).toLocaleDateString() : '?';
   const time = info.trainedAt ? new Date(info.trainedAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '';
@@ -238,6 +294,100 @@ function renderModelInfoCard(info) {
   if (btnTest) btnTest.disabled = false;
 }
 
+/* ── Save-model prompt (auto-shown after training) ───────────────────────── */
+function showSaveModelPrompt() {
+  const el = $('#save-model-prompt');
+  if (!el) return;
+  $('#save-model-name').value = '';
+  $('#save-model-status').textContent = '';
+  $('#save-model-status').className = 'bin-status';
+  el.classList.remove('hidden');
+  setTimeout(() => $('#save-model-name')?.focus(), 80);
+}
+
+function hideSaveModelPrompt() {
+  $('#save-model-prompt')?.classList.add('hidden');
+}
+
+$('#btn-save-confirm')?.addEventListener('click', async () => {
+  const nameEl  = $('#save-model-name');
+  const statEl  = $('#save-model-status');
+  const name    = nameEl?.value.trim() || '';
+  if (!name) { nameEl?.focus(); return; }
+
+  $('#btn-save-confirm').disabled = true;
+  statEl.className = 'bin-status info';
+  statEl.textContent = 'Saving…';
+
+  try {
+    const res = await window.lab.exportModel({ name });
+    if (res.ok) {
+      statEl.className = 'bin-status ok';
+      statEl.textContent = `✓  ${res.relPath}`;
+    } else {
+      statEl.className = 'bin-status err';
+      statEl.textContent = res.error || 'Export failed.';
+    }
+  } catch (e) {
+    statEl.className = 'bin-status err';
+    statEl.textContent = e.message;
+  }
+  $('#btn-save-confirm').disabled = false;
+});
+
+// Allow Enter key to trigger save
+$('#save-model-name')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('#btn-save-confirm')?.click();
+  if (e.key === 'Escape') hideSaveModelPrompt();
+});
+
+$('#btn-save-skip')?.addEventListener('click', hideSaveModelPrompt);
+
+/* ── Export / Import .bin model ──────────────────────────────────────────── */
+function setBinStatus(msg, type = 'info') {
+  const el = $('#bin-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `bin-status ${type}`;
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 6000);
+}
+
+$('#btn-export-model')?.addEventListener('click', async () => {
+  const btn = $('#btn-export-model');
+  btn.disabled = true;
+  setBinStatus('Exporting…', 'info');
+  try {
+    const res = await window.lab.exportModel();
+    if (res.canceled) { setBinStatus(''); }
+    else if (res.ok)  { setBinStatus(`Saved: ${res.filePath.split('/').pop()}`, 'ok'); }
+    else              { setBinStatus(`Error: ${res.error}`, 'err'); }
+  } catch (e) {
+    setBinStatus(`Error: ${e.message}`, 'err');
+  }
+  btn.disabled = !cachedModelInfo?.exists;
+});
+
+$('#btn-import-model')?.addEventListener('click', async () => {
+  const btn = $('#btn-import-model');
+  btn.disabled = true;
+  setBinStatus('Opening file…', 'info');
+  try {
+    const res = await window.lab.importModel();
+    if (res.canceled) {
+      setBinStatus('');
+    } else if (res.ok) {
+      const h = res.header;
+      setBinStatus(`Loaded: F1 ${(h.cv_f1_mean * 100).toFixed(1)}%  ${h.sessions}sess · ${h.window}s window`, 'ok');
+      await refreshModelInfoCard();
+    } else {
+      setBinStatus(`Error: ${res.error}`, 'err');
+    }
+  } catch (e) {
+    setBinStatus(`Error: ${e.message}`, 'err');
+  }
+  btn.disabled = false;
+});
+
 /* ── Train run/stop ───────────────────────────────────────────────────────── */
 const btnTrain     = $('#btn-train');
 const btnStopTrain = $('#btn-stop-train');
@@ -256,6 +406,7 @@ btnTrain.addEventListener('click', async () => {
   logOutput.innerHTML = '';
   resetMetricCards();
   clearCharts();
+  hideSaveModelPrompt();
   livePhase = 'train';
   setStatus('running');
   switchTab('live-train');
@@ -279,13 +430,47 @@ btnStopTrain.addEventListener('click', async () => {
   btnTrain.disabled = false;
 });
 
+/* ── MIST toggle + live bandwidth estimate ────────────────────────────────── */
+const mistToggle   = $('#mist-toggle');
+const mistParamsEl = $('#mist-params');
+
+function updateMistEstimate() {
+  const el = $('#mist-estimate');
+  if (!el) return;
+  if (!mistToggle?.checked) { el.textContent = ''; el.className = 'mist-estimate'; return; }
+  const pFixed   = getParam('mist-pfixed') || 262144;
+  const rate     = getParam('mist-rate')   || 10;
+  const numArchs = getSelectedArchs('arch-toggles').length || 6;
+  const bwMBps   = (pFixed * rate * 2 * numArchs) / (1024 * 1024);
+  const tenMinGB = (bwMBps * 600) / 1024;
+  el.textContent = `~${bwMBps.toFixed(1)} MB/s  ·  ~${tenMinGB.toFixed(1)} GB / 10-min test`;
+  el.className = 'mist-estimate ' + (tenMinGB < 50 ? 'ok' : tenMinGB < 150 ? 'warn' : 'danger');
+}
+
+if (mistToggle) {
+  mistToggle.addEventListener('change', () => {
+    if (mistParamsEl) mistParamsEl.classList.toggle('hidden', !mistToggle.checked);
+    updateMistEstimate();
+    updateAttackerView();
+  });
+}
+// Re-run estimate whenever P_fixed, Rate, or selected archs change
+['pills-mist-pfixed', 'pills-mist-rate'].forEach(id => {
+  $(`#${id}`)?.addEventListener('click', updateMistEstimate);
+});
+$('#arch-toggles')?.addEventListener('click', updateMistEstimate);
+
 /* ── Test run/stop ────────────────────────────────────────────────────────── */
-const btnTest     = $('#btn-test');
-const btnStopTest = $('#btn-stop-test');
+const btnTest         = $('#btn-test');
+const btnStopTest     = $('#btn-stop-test');
+const btnStopSniffing = $('#btn-stop-sniffing');
 
 btnTest.addEventListener('click', async () => {
-  const rounds = getParam('test-rounds') || 5;
-  const archs  = getSelectedArchs('arch-toggles');
+  const rounds     = 5;   // hardcoded — attacker has no say in victim's training schedule
+  const archs      = getSelectedArchs('arch-toggles');
+  const mist       = mistToggle?.checked || false;
+  const mistPFixed = mist ? (getParam('mist-pfixed') || 262144) : 262144;
+  const mistRate   = mist ? (getParam('mist-rate')   || 10)     : 10;
 
   logOutput.innerHTML = '';
   livePhase = 'test';
@@ -294,8 +479,9 @@ btnTest.addEventListener('click', async () => {
   switchTab('live-test');
   buildSessionSteps(1);
   $$('.phase-tab').forEach(t => { if (t.dataset.phase !== 'info') t.classList.add('disabled'); });
-  btnTest.disabled     = true;
-  btnStopTest.disabled = false;
+  btnTest.disabled          = true;
+  btnStopTest.disabled      = false;
+  if (btnStopSniffing) { btnStopSniffing.disabled = false; btnStopSniffing.textContent = '⬛ Stop & Predict'; }
 
   // Clear previous prediction
   $('#pred-grid').innerHTML    = '';
@@ -303,19 +489,29 @@ btnTest.addEventListener('click', async () => {
   $('#pred-model-row').classList.add('hidden');
   $('#pred-empty').style.display = '';
 
-  try { await window.lab.startTest({ rounds, archs }); }
+  try { await window.lab.startTest({ rounds, archs, mist, mistPFixed, mistRate }); }
   catch (err) { appendLog(`[renderer] ${err.message}`); setStatus('error'); }
 
-  btnTest.disabled     = false;
-  btnStopTest.disabled = true;
+  btnTest.disabled          = false;
+  btnStopTest.disabled      = true;
+  if (btnStopSniffing) btnStopSniffing.disabled = true;
   $$('.phase-tab').forEach(t => t.classList.remove('disabled'));
 });
 
 btnStopTest.addEventListener('click', async () => {
   btnStopTest.disabled = true;
+  if (btnStopSniffing) btnStopSniffing.disabled = true;
   await window.lab.stopExperiment();
   btnTest.disabled = false;
 });
+
+if (btnStopSniffing) {
+  btnStopSniffing.addEventListener('click', async () => {
+    btnStopSniffing.disabled    = true;
+    btnStopSniffing.textContent = '⬛ Classifying...';
+    await window.lab.stopSniffing();
+  });
+}
 
 /* ── IPC events ───────────────────────────────────────────────────────────── */
 window.lab.onLog(appendLog);
@@ -345,38 +541,378 @@ function parseCSV(text) {
 }
 
 /* ── Chart defaults ───────────────────────────────────────────────────────── */
-Chart.defaults.color       = '#6b7799';
-Chart.defaults.borderColor = '#2a2a50';
+Chart.defaults.color       = '#6a6a6a';
+Chart.defaults.borderColor = '#333333';
 Chart.defaults.font.family = "'Menlo','Consolas',monospace";
 Chart.defaults.font.size   = 11;
 
 const TOOLTIP_DEFAULTS = {
-  backgroundColor: '#1a1a3a', borderColor: '#2a2a50', borderWidth: 1,
-  titleColor: '#dde2f0', bodyColor: '#dde2f0',
+  backgroundColor: '#212121', borderColor: '#333333', borderWidth: 1,
+  titleColor: '#d4d4d4', bodyColor: '#d4d4d4',
 };
 const SCALE_DEFAULTS = {
-  x: { grid: { color: '#1e1e40' }, ticks: { color: '#6b7799' } },
-  y: { grid: { color: '#1e1e40' }, ticks: { color: '#6b7799' } },
+  x: { grid: { color: '#252525' }, ticks: { color: '#6a6a6a' } },
+  y: { grid: { color: '#252525' }, ticks: { color: '#6a6a6a' } },
 };
 
 function clearCharts() {
-  [chartCapturesTrain, chartCapturesTest, chartF1Variants, chartImportance, chartFamily].forEach(c => { if (c) c.destroy(); });
-  chartCapturesTrain = chartCapturesTest = chartF1Variants = chartImportance = chartFamily = null;
+  [chartCapturesTrain, chartCapturesTest, chartF1Variants, chartImportance, chartFamily,
+   chartAttackerRate, chartEavBox, chartEavSizes]
+    .forEach(c => { if (c) c.destroy(); });
+  chartCapturesTrain = chartCapturesTest = chartF1Variants = chartImportance = chartFamily =
+    chartAttackerRate = chartEavBox = chartEavSizes = null;
   $('#cm-container').innerHTML = '';
   clearDumbbell();
+  resetAttackerView();
+  resetEavesdropper();
+}
+
+/* ── Attacker-view chart ──────────────────────────────────────────────────── */
+const ARCH_ORDER_CAP = ['lstm','gru','bilstm','simplecnn','mobilenet','resnet'];
+
+function resetAttackerView() {
+  prevCapSizes = {};
+  prevCapTime  = null;
+  archRateMap  = {};
+  boxStatsMap  = {};
+  const card = $('#attacker-view-card');
+  if (card) card.classList.add('hidden');
+}
+
+/* ── Eavesdropper tab ─────────────────────────────────────────────────────── */
+function resetEavesdropper() {
+  const chipActive = $('#eav-chip-active');
+  const chipCV     = $('#eav-chip-cv');
+  const chipMist   = $('#eav-chip-mist');
+  if (chipActive) { chipActive.className = 'eav-chip'; chipActive.textContent = '— active'; }
+  if (chipCV)     { chipCV.className     = 'eav-chip'; chipCV.textContent     = 'CV —'; }
+  if (chipMist)   { chipMist.className   = 'eav-chip'; chipMist.textContent   = 'MIST OFF'; }
+}
+
+function updateEavesdropperTab(archMap) {
+  if (livePhase !== 'test') return;
+  const mistOn    = mistToggle?.checked || false;
+  const pFixed    = getParam('mist-pfixed') || 262144;
+  const ratePps   = getParam('mist-rate')   || 10;
+  const expKBps   = mistOn ? (pFixed * ratePps * 2) / 1024 : null;
+
+  // ── Chips ──
+  const activeCount = ARCH_ORDER_CAP.filter(a => (archMap[a] || 0) > 0).length;
+  const chipActive  = $('#eav-chip-active');
+  if (chipActive) chipActive.textContent = `${activeCount}/6 active`;
+
+  const observed = ARCH_ORDER_CAP.map(a => archRateMap[a] || 0).filter(r => r > 0);
+  const chipCV   = $('#eav-chip-cv');
+  if (chipCV && observed.length >= 2) {
+    const mean = observed.reduce((s, v) => s + v, 0) / observed.length;
+    const cv   = Math.sqrt(observed.reduce((s, v) => s + (v - mean) ** 2, 0) / observed.length) / mean;
+    chipCV.textContent = `CV ${(cv * 100).toFixed(1)}%`;
+    chipCV.className   = `eav-chip ${cv < 0.12 ? 'ok' : cv < 0.30 ? 'warn' : 'danger'}`;
+  }
+
+  const chipMist = $('#eav-chip-mist');
+  if (chipMist) {
+    chipMist.textContent = mistOn ? 'MIST ON' : 'MIST OFF';
+    chipMist.className   = `eav-chip ${mistOn ? 'mist-on' : ''}`;
+  }
+
+  // Show/hide MIST params card
+  const mistCard = $('#eav-mist-card');
+  if (mistCard) mistCard.style.display = mistOn ? '' : 'none';
+
+  // ── Packet size box plot ──
+  const boxLabels = ARCH_ORDER_CAP.map(a => `${a.toUpperCase()} (${ARCH_FAMILY[a] || '?'})`);
+  const boxCanvas = $('#chart-eav-box');
+  if (boxCanvas) {
+    // Invisible floating-bar dataset drives the y-scale; actual drawing is via plugin
+    const scaleData = ARCH_ORDER_CAP.map(a => {
+      const s = boxStatsMap[a];
+      return s ? [s.min, s.max] : null;
+    });
+
+    const boxDrawPlugin = {
+      id: 'boxDraw',
+      afterDatasetsDraw(chart) {
+        const ctx = chart.ctx;
+        const yScale = chart.scales.y;
+        const meta = chart.getDatasetMeta(0);
+        ARCH_ORDER_CAP.forEach((arch, i) => {
+          const s = boxStatsMap[arch];
+          if (!s || !meta.data[i]) return;
+          const color = ARCH_COLORS[arch] || '#6a6a6a';
+          const cx = meta.data[i].x;
+          const boxHalf = 18, capHalf = 8;
+          const yMin  = yScale.getPixelForValue(s.min);
+          const yMax  = yScale.getPixelForValue(s.max);
+          const yQ1   = yScale.getPixelForValue(s.q1);
+          const yQ3   = yScale.getPixelForValue(s.q3);
+          const yMed  = yScale.getPixelForValue(s.median);
+          ctx.save();
+          // Whisker stem
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(cx, yMin); ctx.lineTo(cx, yMax); ctx.stroke();
+          // Whisker caps
+          ctx.lineWidth = 1.5;
+          [[yMin, capHalf], [yMax, capHalf]].forEach(([y, hw]) => {
+            ctx.beginPath(); ctx.moveTo(cx - hw, y); ctx.lineTo(cx + hw, y); ctx.stroke();
+          });
+          // IQR box (filled + border)
+          ctx.fillStyle = color + '33';
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.fillRect(cx - boxHalf, yQ3, boxHalf * 2, yQ1 - yQ3);
+          ctx.strokeRect(cx - boxHalf, yQ3, boxHalf * 2, yQ1 - yQ3);
+          // Median line
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.moveTo(cx - boxHalf, yMed); ctx.lineTo(cx + boxHalf, yMed); ctx.stroke();
+          ctx.restore();
+        });
+      },
+    };
+
+    if (chartEavBox) {
+      chartEavBox.data.datasets[0].data = scaleData;
+      chartEavBox.update('none');
+    } else {
+      chartEavBox = new Chart(boxCanvas, {
+        type: 'bar',
+        plugins: [boxDrawPlugin],
+        data: {
+          labels: boxLabels,
+          datasets: [{
+            data: scaleData,
+            backgroundColor: 'transparent',
+            borderWidth: 0,
+            barPercentage: 0.6,
+          }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              ...TOOLTIP_DEFAULTS,
+              callbacks: {
+                title: items => items[0]?.label || '',
+                label: ctx => {
+                  const arch = ARCH_ORDER_CAP[ctx.dataIndex];
+                  const s = boxStatsMap[arch];
+                  if (!s) return 'No data yet';
+                  return [
+                    `Median : ${s.median} B`,
+                    `IQR    : ${s.q1} – ${s.q3} B`,
+                    `Range  : ${s.min} – ${s.max} B`,
+                    `Mean   : ${Math.round(s.mean)} B`,
+                    `Packets: ${s.count.toLocaleString()}`,
+                  ];
+                },
+              },
+            },
+          },
+          scales: {
+            x: { ...SCALE_DEFAULTS.x, ticks: { color: '#d4d4d4', font: { size: 10 } } },
+            y: { ...SCALE_DEFAULTS.y, min: 0,
+              ticks: { color: '#6a6a6a', callback: v => `${v} B` } },
+          },
+        },
+      });
+    }
+  }
+
+  // ── PCAP cumulative size chart ──
+  const sizeData   = ARCH_ORDER_CAP.map(a => (archMap[a] || 0) / (1024 * 1024));  // MB
+  const sizeCanvas = $('#chart-eav-pcap');
+  if (sizeCanvas) {
+    if (chartEavSizes) {
+      chartEavSizes.data.datasets[0].data = sizeData;
+      chartEavSizes.update('none');
+    } else {
+      chartEavSizes = new Chart(sizeCanvas, {
+        type: 'bar',
+        data: { labels: boxLabels,
+          datasets: [{ label: 'PCAP (MB)', data: sizeData, backgroundColor: boxLabels.map((_, i) => ARCH_COLORS[ARCH_ORDER_CAP[i]]),
+            borderWidth: 0, borderRadius: 4 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { ...TOOLTIP_DEFAULTS, callbacks: {
+              label: ctx => `${ctx.raw.toFixed(2)} MB`,
+            }},
+          },
+          scales: {
+            x: { ...SCALE_DEFAULTS.x, ticks: { color: '#d4d4d4', font: { size: 10 } } },
+            y: { ...SCALE_DEFAULTS.y, min: 0, ticks: { color: '#6a6a6a',
+              callback: v => `${v.toFixed(1)} MB` } },
+          },
+        },
+      });
+    }
+  }
+}
+
+function updateAttackerView() {
+  const card = $('#attacker-view-card');
+  if (!card) return;
+
+  const mistOn = mistToggle?.checked || false;
+  const isTest = livePhase === 'test';
+  card.classList.toggle('hidden', !(mistOn && isTest));
+  if (!mistOn || !isTest) return;
+
+  const pFixed        = getParam('mist-pfixed') || 262144;
+  const ratePps       = getParam('mist-rate')   || 10;
+  // Expected attacker-visible throughput per arch: P_fixed × R × 2 directions
+  const expectedBps   = pFixed * ratePps * 2;
+  const expectedKBps  = expectedBps / 1024;
+
+  // ── Stat chips ──
+  const pFixedEl = $('#attacker-pkt-size');
+  const rateEl   = $('#attacker-wire-rate');
+  const distEl   = $('#attacker-distinguishable');
+  if (pFixedEl) pFixedEl.textContent = `${(pFixed / 1024).toFixed(0)} KB  (all packets uniform)`;
+  if (rateEl)   rateEl.textContent   = `${(expectedKBps / 1024).toFixed(1)} MB/s  (${ratePps} pps)`;
+
+  // Distinguishable? — coefficient of variation across observed arch rates
+  const observedRates = ARCH_ORDER_CAP.map(a => archRateMap[a] || 0).filter(r => r > 0);
+  if (distEl) {
+    if (observedRates.length < 2) {
+      distEl.textContent = 'Waiting…';
+      distEl.style.color = 'var(--muted)';
+    } else {
+      const mean = observedRates.reduce((s, v) => s + v, 0) / observedRates.length;
+      const cv   = Math.sqrt(observedRates.reduce((s, v) => s + (v - mean) ** 2, 0) / observedRates.length) / mean;
+      if (cv < 0.12) {
+        distEl.textContent = 'NO — uniform ✓';
+        distEl.style.color = 'var(--green)';
+      } else {
+        distEl.textContent = 'YES — varies ✗';
+        distEl.style.color = 'var(--red)';
+      }
+    }
+  }
+
+  // ── Rate bar chart ──
+  const activeArchs = ARCH_ORDER_CAP;
+  const labels  = activeArchs.map(a => `${a.toUpperCase()} (${ARCH_FAMILY[a] || '?'})`);
+  const data    = activeArchs.map(a => (archRateMap[a] || 0) / 1024);   // KB/s
+  const colors  = activeArchs.map(a => ARCH_COLORS[a] || '#6a6a6a');
+  const target  = activeArchs.map(() => expectedKBps);
+
+  const canvas = $('#chart-attacker-rate');
+  if (!canvas) return;
+
+  if (chartAttackerRate) {
+    chartAttackerRate.data.datasets[0].data = data;
+    chartAttackerRate.data.datasets[0].backgroundColor = colors;
+    chartAttackerRate.data.datasets[1].data = target;
+    chartAttackerRate.update('none');
+    return;
+  }
+
+  chartAttackerRate = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Observed throughput',
+          data,
+          backgroundColor: colors,
+          borderWidth: 0,
+          borderRadius: 4,
+          order: 2,
+        },
+        {
+          label: `MIST target (${(expectedKBps / 1024).toFixed(1)} MB/s)`,
+          data: target,
+          type: 'line',
+          borderColor: '#818cf8',
+          borderWidth: 2,
+          borderDash: [5, 4],
+          pointRadius: 0,
+          fill: false,
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: '#6a6a6a', font: { size: 10 }, boxWidth: 14 },
+        },
+        tooltip: {
+          ...TOOLTIP_DEFAULTS,
+          callbacks: {
+            label: ctx => ctx.datasetIndex === 0
+              ? `${ctx.raw.toFixed(0)} KB/s`
+              : `${ctx.raw.toFixed(0)} KB/s  (target)`,
+          },
+        },
+      },
+      scales: {
+        x: { ...SCALE_DEFAULTS.x, ticks: { color: '#d4d4d4', font: { size: 10 } } },
+        y: {
+          ...SCALE_DEFAULTS.y,
+          min: 0,
+          ticks: {
+            color: '#6a6a6a',
+            callback: v => v >= 1024 ? `${(v / 1024).toFixed(1)} MB/s` : `${v} KB/s`,
+          },
+        },
+      },
+    },
+  });
 }
 
 /* ── Capture chart ────────────────────────────────────────────────────────── */
-const ARCH_ORDER_CAP = ['lstm','gru','bilstm','simplecnn','mobilenet','resnet'];
 
 function renderCaptureChart(list) {
   // Aggregate bytes per arch across all sessions
   const archMap = {};
   list.forEach(f => { archMap[f.arch] = (archMap[f.arch] || 0) + f.size; });
+
+  // Merge any fresh box stats from main process
+  list.forEach(f => { if (f.boxStats) boxStatsMap[f.arch] = f.boxStats; });
+
+  // ── Compute per-arch throughput rate for attacker view ──
+  if (livePhase === 'test') {
+    const now = Date.now();
+    if (prevCapTime !== null) {
+      const dt = (now - prevCapTime) / 1000;   // seconds
+      if (dt >= 1.5) {
+        ARCH_ORDER_CAP.forEach(arch => {
+          const cur  = archMap[arch] || 0;
+          const prev = prevCapSizes[arch] || 0;
+          const delta = cur - prev;
+          if (delta >= 0 && cur > 0) {
+            // Exponential moving average for smoother display
+            const raw = delta / dt;
+            archRateMap[arch] = archRateMap[arch]
+              ? archRateMap[arch] * 0.4 + raw * 0.6
+              : raw;
+          }
+        });
+        prevCapTime = now;
+        ARCH_ORDER_CAP.forEach(arch => { prevCapSizes[arch] = archMap[arch] || 0; });
+        updateAttackerView();
+        updateEavesdropperTab(archMap);
+      }
+    } else {
+      prevCapTime = now;
+      ARCH_ORDER_CAP.forEach(arch => { prevCapSizes[arch] = archMap[arch] || 0; });
+    }
+  }
+
   const activeArchs = ARCH_ORDER_CAP.filter(a => archMap[a] !== undefined);
   const labels  = activeArchs.map(a => `${a.toUpperCase()} (${ARCH_FAMILY[a] || '?'})`);
   const data    = activeArchs.map(a => archMap[a]);
-  const colors  = activeArchs.map(a => ARCH_COLORS[a] || '#6b7799');
+  const colors  = activeArchs.map(a => ARCH_COLORS[a] || '#6a6a6a');
 
   const isTest  = livePhase === 'test';
   const canvasId = isTest ? '#chart-captures-test' : '#chart-captures-train';
@@ -395,8 +931,8 @@ function renderCaptureChart(list) {
           label: ctx => `${(ctx.raw/1024).toFixed(1)} KB total`,
         } } },
       scales: {
-        x: { ...SCALE_DEFAULTS.x, ticks: { color:'#dde2f0', font:{ size:10 } } },
-        y: { ...SCALE_DEFAULTS.y, ticks: { color:'#6b7799', callback: v => (v/1024).toFixed(0)+'K' } },
+        x: { ...SCALE_DEFAULTS.x, ticks: { color:'#d4d4d4', font:{ size:10 } } },
+        y: { ...SCALE_DEFAULTS.y, ticks: { color:'#6a6a6a', callback: v => (v/1024).toFixed(0)+'K' } },
       },
     },
   };
@@ -463,8 +999,8 @@ function renderF1VariantsChart(variants, means) {
     options: { responsive:true, maintainAspectRatio:false,
       plugins: { legend:{display:false}, tooltip:{...TOOLTIP_DEFAULTS,
         callbacks:{label:ctx=>(ctx.raw*100).toFixed(2)+'% F1'}} },
-      scales: { x:{...SCALE_DEFAULTS.x,ticks:{color:'#6b7799',font:{size:10}}},
-                y:{...SCALE_DEFAULTS.y,ticks:{color:'#6b7799',callback:v=>(v*100).toFixed(0)+'%'},min:0,max:1} } },
+      scales: { x:{...SCALE_DEFAULTS.x,ticks:{color:'#6a6a6a',font:{size:10}}},
+                y:{...SCALE_DEFAULTS.y,ticks:{color:'#6a6a6a',callback:v=>(v*100).toFixed(0)+'%'},min:0,max:1} } },
   });
 }
 
@@ -481,8 +1017,8 @@ function renderImportanceChart(csvText) {
     data: { labels, datasets:[{data, backgroundColor:'#00d4aa', borderWidth:0, borderRadius:3}] },
     options: { indexAxis:'y', responsive:true, maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{...TOOLTIP_DEFAULTS,callbacks:{label:ctx=>ctx.raw.toFixed(4)}}},
-      scales:{x:{...SCALE_DEFAULTS.x,ticks:{color:'#6b7799',callback:v=>v.toFixed(3)}},
-              y:{...SCALE_DEFAULTS.y,ticks:{color:'#dde2f0',font:{size:10}}}} },
+      scales:{x:{...SCALE_DEFAULTS.x,ticks:{color:'#6a6a6a',callback:v=>v.toFixed(3)}},
+              y:{...SCALE_DEFAULTS.y,ticks:{color:'#d4d4d4',font:{size:10}}}} },
   });
 }
 
@@ -500,7 +1036,7 @@ function renderFamilyChart(fj) {
     if (familyObj.per_arch && Object.keys(familyObj.per_arch).length) {
       Object.entries(familyObj.per_arch).forEach(([name, f1]) => {
         labels.push(name); data.push(f1);
-        colors.push(ARCH_COLORS[ARCH_KEY[name]] || '#6b7799');
+        colors.push(ARCH_COLORS[ARCH_KEY[name]] || '#6a6a6a');
         stds.push(null);
       });
     } else {
@@ -525,8 +1061,8 @@ function renderFamilyChart(fj) {
             ? `${(ctx.raw*100).toFixed(1)}% ± ${(std*100).toFixed(1)}%`
             : `${(ctx.raw*100).toFixed(1)}% F1`;
         }}}},
-      scales:{x:{...SCALE_DEFAULTS.x,ticks:{color:'#dde2f0',font:{size:10}}},
-              y:{...SCALE_DEFAULTS.y,ticks:{color:'#6b7799',callback:v=>(v*100).toFixed(0)+'%'},min:0,max:1}} },
+      scales:{x:{...SCALE_DEFAULTS.x,ticks:{color:'#d4d4d4',font:{size:10}}},
+              y:{...SCALE_DEFAULTS.y,ticks:{color:'#6a6a6a',callback:v=>(v*100).toFixed(0)+'%'},min:0,max:1}} },
   });
 }
 
@@ -563,7 +1099,7 @@ function renderConfusionMatrix(csvText) {
       const td  = document.createElement('td');
       const int = maxVal>0 ? val/maxVal : 0;
       td.style.backgroundColor=`rgba(0,180,216,${(int*0.85).toFixed(2)})`;
-      td.style.color=int>0.45?'#ffffff':'#6b7799';
+      td.style.color=int>0.45?'#ffffff':'#6a6a6a';
       if(ri===ci) td.classList.add('diagonal');
       td.textContent=val; td.title=`${row.label} → ${classNames[ci]}: ${val}`;
       tr.appendChild(td);
@@ -646,7 +1182,7 @@ function renderPrediction(data) {
           const disp = ARCH_DISPLAY[name.toLowerCase()] || name;
           return `<div class="vote-row">
             <span class="vote-name">${disp}</span>
-            <span class="vote-bar-wrap"><span class="vote-bar" style="width:${pct}%;background:${ARCH_COLORS[name.toLowerCase()]||'#6b7799'}"></span></span>
+            <span class="vote-bar-wrap"><span class="vote-bar" style="width:${pct}%;background:${ARCH_COLORS[name.toLowerCase()]||'#6a6a6a'}"></span></span>
             <span class="vote-pct">${pct}%</span>
           </div>`;
         }).join('');
@@ -678,8 +1214,8 @@ function getDbTooltip() {
     _dbTooltip = document.createElement('div');
     Object.assign(_dbTooltip.style, {
       position:'fixed', display:'none', pointerEvents:'none',
-      background:'#1a1a3a', border:'1px solid #2a2a50', borderRadius:'6px',
-      padding:'6px 10px', font:'11px Menlo,Consolas,monospace', color:'#dde2f0',
+      background:'#212121', border:'1px solid #2a2a50', borderRadius:'6px',
+      padding:'6px 10px', font:'11px Menlo,Consolas,monospace', color:'#d4d4d4',
       zIndex:'9999', whiteSpace:'nowrap', lineHeight:'1.6',
     });
     document.body.appendChild(_dbTooltip);
@@ -758,40 +1294,40 @@ function drawDumbbellOnCanvas(canvasEl, sessionData) {
   // Round gridlines + labels
   for (let r = 1; r <= numRounds; r++) {
     const y = yScale(r);
-    ctx.strokeStyle = '#1e1e40'; ctx.lineWidth = 1; ctx.setLineDash([3, 6]);
+    ctx.strokeStyle = '#252525'; ctx.lineWidth = 1; ctx.setLineDash([3, 6]);
     ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = '#6b7799'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#6a6a6a'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillText(`Round ${r}`, pad.left - 8, y);
   }
 
   // X axis
-  ctx.strokeStyle = '#2a2a50'; ctx.lineWidth = 1; ctx.setLineDash([]);
+  ctx.strokeStyle = '#333333'; ctx.lineWidth = 1; ctx.setLineDash([]);
   ctx.beginPath(); ctx.moveTo(pad.left, pad.top + ph); ctx.lineTo(pad.left + pw, pad.top + ph); ctx.stroke();
 
   // X ticks
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#6b7799';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#6a6a6a';
   for (let i = 0; i <= 5; i++) {
     const t   = (maxTs / 5) * i;
     const x   = xScale(t);
     const lbl = t >= 60000 ? `${(t/60000).toFixed(1)}m` : t >= 1000 ? `${(t/1000).toFixed(1)}s` : `${Math.round(t)}ms`;
     ctx.fillText(lbl, x, pad.top + ph + 7);
-    ctx.strokeStyle = '#2a2a50'; ctx.lineWidth = 1;
+    ctx.strokeStyle = '#333333'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, pad.top + ph); ctx.lineTo(x, pad.top + ph + 4); ctx.stroke();
   }
 
   // X axis title
-  ctx.fillStyle = '#6b7799'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillStyle = '#6a6a6a'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
   ctx.font = '9px Menlo, Consolas, monospace';
   ctx.fillText('← Time from session start (dot = round completion)', pad.left + pw / 2, H - 2);
   ctx.font = '10px Menlo, Consolas, monospace';
 
   // Y axis line
-  ctx.strokeStyle = '#2a2a50'; ctx.lineWidth = 1;
+  ctx.strokeStyle = '#333333'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph); ctx.stroke();
 
   if (!allPoints.length) {
-    ctx.fillStyle = '#6b7799'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#6a6a6a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('Waiting for round data…', W / 2, H / 2);
     return;
   }
@@ -891,6 +1427,12 @@ function startNewTestRun() {
   switchTestRun(currentTestRunNum);
   const empty = $('#test-dumbbell-empty');
   if (empty) empty.style.display = 'none';
+  // Reset rate tracking for fresh eavesdropper/attacker views
+  prevCapSizes = {};
+  prevCapTime  = null;
+  archRateMap  = {};
+  updateAttackerView();
+  resetEavesdropper();
 }
 
 function onTestRoundEvent({ arch, round, timestamp, bytes }) {

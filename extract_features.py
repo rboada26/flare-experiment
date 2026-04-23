@@ -78,12 +78,13 @@ def extract_flow_features(window):
     def safe_stats(arr):
         if len(arr) == 0:
             return [0] * 9
+        has_variance = len(arr) > 1 and np.std(arr) > 0
         return [
             np.mean(arr), np.max(arr), np.min(arr),
             np.var(arr),  np.std(arr), np.median(arr),
             stats.median_abs_deviation(arr) if len(arr) > 1 else 0,
-            stats.skew(arr)     if len(arr) > 2 else 0,
-            stats.kurtosis(arr) if len(arr) > 3 else 0,
+            stats.skew(arr)     if has_variance and len(arr) > 2 else 0,
+            stats.kurtosis(arr) if has_variance and len(arr) > 3 else 0,
         ]
 
     feats  = [len(window) / duration, len(uplink) / (len(downlink) + 1e-9)]

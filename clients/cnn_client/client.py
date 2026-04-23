@@ -1,3 +1,4 @@
+import os, time
 import flwr as fl
 import torch
 import torch.nn as nn
@@ -71,9 +72,26 @@ class CNNClient(fl.client.NumPyClient):
         return loss / len(testloader), total, {"accuracy": correct / total}
 
 if __name__ == "__main__":
-    import os, time
+    _profile = os.environ.get('CLIENT_PROFILE', '')
+    if _profile in ('orin', 'laptop', 'macbook'):
+        import subprocess
+        _tc = {'orin': ('50mbit', '20ms', '8ms'), 'laptop': ('150mbit', '10ms', '3ms'), 'macbook': ('300mbit', '5ms', '1ms')}
+        _r, _d, _j = _tc[_profile]
+        subprocess.run(['tc', 'qdisc', 'replace', 'dev', 'eth0', 'root', 'netem', 'rate', _r, 'delay', _d, _j], check=False)
     time.sleep(8)
-    fl.client.start_client(
-        server_address=f"{os.environ.get('FL_SERVER_ADDR', 'cnn_server')}:8080",
-        client=CNNClient().to_client(),
-    )
+    _mist = os.environ.get('MIST_ENABLED', '').lower() == 'true'
+    _host = os.environ.get('FL_SERVER_ADDR', 'cnn_server')
+    if _mist:
+        import threading, asyncio
+        from mist_proxy import MISTConfig, run_client_proxy
+        _cfg = MISTConfig(
+            int(os.environ.get('MIST_P_FIXED', '262144')),
+            int(os.environ.get('MIST_RATE', '10')),
+            float(os.environ.get('MIST_SESSION_DURATION', '0')),
+        )
+        threading.Thread(target=lambda: asyncio.run(run_client_proxy(9091, _host, 9090, _cfg)), daemon=True).start()
+        time.sleep(1)
+        _addr = 'localhost:9091'
+    else:
+        _addr = f'{_host}:8080'
+    fl.client.start_client(server_address=_addr, client=CNNClient().to_client())

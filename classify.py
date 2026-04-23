@@ -34,8 +34,8 @@ FLOW_COLS = [c for c in df.columns if c.startswith(
 PKT_COLS  = [c for c in df.columns if c.startswith(
     ("hist_","first_","last_"))]
 
-X_flow = df[FLOW_COLS].values.astype(np.float32)
-X_pkt  = df[PKT_COLS].values.astype(np.float32)
+X_flow = np.nan_to_num(df[FLOW_COLS].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+X_pkt  = np.nan_to_num(df[PKT_COLS].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
 y      = df["label"].values
 
 print(f"Dataset: {len(df)} windows | {len(FLOW_COLS)} flow features | {len(PKT_COLS)} packet features")
@@ -51,17 +51,24 @@ def multiclass_scores(y_true, y_pred):
     }
 
 # ── Cross-validation ──────────────────────────────────────────────────────────
-cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+n_splits = min(5, int(np.unique(y, return_counts=True)[1].min()))
+cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
 variants = ["flow_only", "packet_only", "fusion_MetaLR", "fusion_MetaXGB"]
 fold_records = []
 all_y_true, all_y_pred = {v: [] for v in variants}, {v: [] for v in variants}
 
+def _scale(train, test=None):
+    """Fit scaler on train, transform both; replace any residual NaN/inf."""
+    sc = StandardScaler()
+    tr = np.nan_to_num(sc.fit_transform(train))
+    if test is None:
+        return tr
+    return tr, np.nan_to_num(sc.transform(test))
+
 for fold, (train_idx, test_idx) in enumerate(cv.split(X_flow, y)):
-    Xf_tr = StandardScaler().fit_transform(X_flow[train_idx])
-    Xf_te = StandardScaler().fit_transform(X_flow[test_idx])
-    Xp_tr = StandardScaler().fit_transform(X_pkt[train_idx])
-    Xp_te = StandardScaler().fit_transform(X_pkt[test_idx])
+    Xf_tr, Xf_te = _scale(X_flow[train_idx], X_flow[test_idx])
+    Xp_tr, Xp_te = _scale(X_pkt[train_idx],  X_pkt[test_idx])
     y_tr, y_te = y[train_idx], y[test_idx]
 
     # Base Random Forests
@@ -101,7 +108,7 @@ for fold, (train_idx, test_idx) in enumerate(cv.split(X_flow, y)):
 detail_df = pd.DataFrame(fold_records)
 
 print("=" * 65)
-print("FINE-GRAINED FINGERPRINTING RESULTS (6 classes, 5-fold CV)")
+print(f"FINE-GRAINED FINGERPRINTING RESULTS (6 classes, {n_splits}-fold CV)")
 print("=" * 65)
 print(f"{'Variant':<20} {'Precision':>10} {'Recall':>10} {'F1':>10}")
 print("-" * 65)
@@ -137,8 +144,7 @@ print(classification_report(
 print("Top 15 most important flow features (full dataset RF):")
 rf_full = RandomForestClassifier(
     n_estimators=N_ESTIMATORS, class_weight="balanced", random_state=42, n_jobs=-1)
-scaler = StandardScaler()
-rf_full.fit(scaler.fit_transform(X_flow), y)
+rf_full.fit(_scale(X_flow), y)
 imp_df = pd.DataFrame({
     "feature":    FLOW_COLS,
     "importance": rf_full.feature_importances_,
@@ -153,9 +159,9 @@ cnn_mean, cnn_std, cnn_per_arch = 0.0, 0.0, {}
 print("\n--- CNN family only (SimpleCNN vs ResNet18 vs MobileNet) ---")
 if len(cnn_present) >= 2:
     cnn_mask = df["label"].isin(cnn_present)
-    Xf_cnn = StandardScaler().fit_transform(X_flow[cnn_mask])
+    Xf_cnn = _scale(X_flow[cnn_mask])
     y_cnn  = y[cnn_mask]
-    cv_cnn = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_cnn = StratifiedKFold(n_splits=min(5, int(np.unique(y_cnn, return_counts=True)[1].min())), shuffle=True, random_state=42)
     cnn_f1s, all_cnn_true, all_cnn_pred = [], [], []
     for tr, te in cv_cnn.split(Xf_cnn, y_cnn):
         rf = RandomForestClassifier(n_estimators=N_ESTIMATORS, class_weight="balanced",
@@ -177,9 +183,9 @@ rnn_mean, rnn_std, rnn_per_arch = 0.0, 0.0, {}
 print("\n--- RNN family only (GRU vs LSTM vs BiLSTM) ---")
 if len(rnn_present) >= 2:
     rnn_mask = df["label"].isin(rnn_present)
-    Xf_rnn = StandardScaler().fit_transform(X_flow[rnn_mask])
+    Xf_rnn = _scale(X_flow[rnn_mask])
     y_rnn  = y[rnn_mask]
-    cv_rnn = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_rnn = StratifiedKFold(n_splits=min(5, int(np.unique(y_rnn, return_counts=True)[1].min())), shuffle=True, random_state=42)
     rnn_f1s, all_rnn_true, all_rnn_pred = [], [], []
     for tr, te in cv_rnn.split(Xf_rnn, y_rnn):
         rf = RandomForestClassifier(n_estimators=N_ESTIMATORS, class_weight="balanced",
@@ -218,8 +224,8 @@ os.makedirs("model", exist_ok=True)
 
 fs_flow = StandardScaler().fit(X_flow)
 fs_pkt  = StandardScaler().fit(X_pkt)
-Xf_all  = fs_flow.transform(X_flow)
-Xp_all  = fs_pkt.transform(X_pkt)
+Xf_all  = np.nan_to_num(fs_flow.transform(X_flow))
+Xp_all  = np.nan_to_num(fs_pkt.transform(X_pkt))
 
 fr_flow = RandomForestClassifier(n_estimators=N_ESTIMATORS, class_weight="balanced",
                                   random_state=42, n_jobs=-1)

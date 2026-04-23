@@ -101,6 +101,10 @@
     </div>
 
     <div class="sidebar-section">
+      <div id="train-cv-estimate" class="train-cv-estimate"></div>
+    </div>
+
+    <div class="sidebar-section">
       <div id="status-badge" class="status-badge status-idle">Idle</div>
     </div>
 
@@ -114,6 +118,23 @@
       <div id="steps-list"></div>
     </div>
 
+    <!-- Appears automatically when training finishes -->
+    <div id="save-model-prompt" class="sidebar-section save-model-prompt hidden">
+      <div class="section-label">SAVE MODEL</div>
+      <div class="save-name-row">
+        <span class="save-prefix">flare_model_</span>
+        <input id="save-model-name" type="text" class="save-model-input"
+               placeholder="my_experiment" maxlength="80" spellcheck="false" />
+        <span class="save-ext">.bin</span>
+      </div>
+      <div class="save-hint">Saved to <code>saved_models/</code></div>
+      <div class="save-actions">
+        <button id="btn-save-confirm" class="btn-bin btn-bin-export">&#8593; Save</button>
+        <button id="btn-save-skip"    class="btn-bin btn-bin-skip">Skip</button>
+      </div>
+      <div id="save-model-status" class="bin-status"></div>
+    </div>
+
   </div><!-- /phase-train -->
 
   <!-- ── TEST phase ──────────────────────────────────────────────────────── -->
@@ -123,6 +144,11 @@
       <div id="model-info-card" class="model-info-card">
         <div class="model-info-none">No trained model.<br>Run Train phase first.</div>
       </div>
+      <div class="model-bin-actions">
+        <button id="btn-import-model" class="btn-bin btn-bin-import" title="Load a previously exported .bin model file">&#8645; Import .bin</button>
+        <button id="btn-export-model" class="btn-bin btn-bin-export" title="Save current model to a portable .bin file" disabled>&#8593; Export .bin</button>
+      </div>
+      <div id="bin-status" class="bin-status"></div>
     </div>
 
     <div class="sidebar-section">
@@ -139,10 +165,36 @@
 
     <div class="sidebar-section">
       <div class="section-label">FL ROUNDS</div>
-      <div class="pill-group" id="pills-test-rounds">
-        <button class="pill active" data-value="5">5</button>
-        <button class="pill" data-value="10">10</button>
-        <button class="pill" data-value="20">20</button>
+      <div class="locked-note">5 rounds — hardcoded. The attacker cannot control the victim's training schedule.</div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">MIST OBFUSCATION</div>
+      <div class="mist-toggle-row">
+        <label class="mist-switch">
+          <input type="checkbox" id="mist-toggle" />
+          <span class="mist-switch-track"></span>
+        </label>
+        <span class="mist-label-text">Enable MIST</span>
+        <span class="mist-label-badge">DEFENSE</span>
+      </div>
+      <div id="mist-params" class="mist-params hidden">
+        <div class="mist-sub-label">PACKET SIZE (P_FIXED)</div>
+        <div class="pill-group" id="pills-mist-pfixed">
+          <button class="pill" data-value="65536">64K</button>
+          <button class="pill active" data-value="262144">256K</button>
+          <button class="pill" data-value="1048576">1M</button>
+          <button class="pill" data-value="4194304">4M</button>
+          <button class="pill" data-value="16777216">16M</button>
+        </div>
+        <div class="mist-sub-label">RATE (PKTS/SEC)</div>
+        <div class="pill-group" id="pills-mist-rate">
+          <button class="pill" data-value="5">5</button>
+          <button class="pill active" data-value="10">10</button>
+          <button class="pill" data-value="20">20</button>
+          <button class="pill" data-value="50">50</button>
+        </div>
+        <div id="mist-estimate" class="mist-estimate"></div>
       </div>
     </div>
 
@@ -262,6 +314,7 @@
     <div class="tab-bar">
       <button class="tab-btn active" data-tab="live-train">Live Training</button>
       <button class="tab-btn"        data-tab="live-test">Live Testing</button>
+      <button class="tab-btn"        data-tab="eavesdropper">Eavesdropper</button>
       <button class="tab-btn"        data-tab="results">Results</button>
       <button class="tab-btn"        data-tab="prediction">Prediction</button>
     </div>
@@ -297,6 +350,7 @@
 
     <!-- Live Testing tab: captures bar + test dumbbell -->
     <div id="tab-live-test" class="tab-content live-combined">
+
       <div class="chart-card captures-card">
         <div class="chart-card-title">PCAP File Sizes — Testing</div>
         <div class="chart-wrap"><canvas id="chart-captures-test"></canvas></div>
@@ -323,6 +377,58 @@
         </div>
       </div>
     </div>
+
+    <!-- Eavesdropper tab -->
+    <div id="tab-eavesdropper" class="tab-content">
+
+      <!-- Header card -->
+      <div class="chart-card eav-header-card">
+        <div class="eav-header-row">
+          <span class="eav-eye">⊙</span>
+          <span class="chart-card-title eav-title">Eavesdropper View</span>
+          <span class="eav-subtitle">Passive network observer — what the attacker sees on the wire during a test session</span>
+          <div class="eav-chips">
+            <div class="eav-chip" id="eav-chip-active">— active</div>
+            <div class="eav-chip" id="eav-chip-cv">CV —</div>
+            <div class="eav-chip" id="eav-chip-mist">MIST OFF</div>
+          </div>
+          <button id="btn-stop-sniffing" class="btn-stop-sniff" disabled>⬛ Stop &amp; Predict</button>
+        </div>
+      </div>
+
+      <!-- Two charts side by side -->
+      <div class="eav-charts-row">
+        <div class="chart-card">
+          <div class="chart-card-title">Packet Size Distribution (bytes)</div>
+          <div class="chart-wrap eav-chart-wrap"><canvas id="chart-eav-box"></canvas></div>
+          <div class="eav-note">Box = IQR (Q1–Q3). Line = median. Whiskers = min/max. Under MIST all boxes should collapse to the same height at P_fixed.</div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">Cumulative PCAP Size (MB)</div>
+          <div class="chart-wrap eav-chart-wrap"><canvas id="chart-eav-pcap"></canvas></div>
+          <div class="eav-note">Total wire bytes captured per architecture. Under MIST sizes vary only by session duration — per-packet size is uniform.</div>
+        </div>
+      </div>
+
+      <!-- MIST params card — only shown when MIST is on -->
+      <div class="chart-card" id="eav-mist-card" style="flex:0 0 auto; display:none; border-color:rgba(129,140,248,0.25); background:rgba(129,140,248,0.03);">
+        <div class="attacker-stats-row">
+          <div class="attacker-stat">
+            <div class="attacker-stat-label">Packet Size (P_fixed)</div>
+            <div id="attacker-pkt-size" class="attacker-stat-val">—</div>
+          </div>
+          <div class="attacker-stat">
+            <div class="attacker-stat-label">Wire Rate / Arch</div>
+            <div id="attacker-wire-rate" class="attacker-stat-val">—</div>
+          </div>
+          <div class="attacker-stat">
+            <div class="attacker-stat-label">Architectures Distinguishable?</div>
+            <div id="attacker-distinguishable" class="attacker-stat-val">—</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /tab-eavesdropper -->
 
     <!-- Results tab -->
     <div id="tab-results" class="tab-content">

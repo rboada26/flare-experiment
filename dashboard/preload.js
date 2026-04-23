@@ -5,7 +5,10 @@ contextBridge.exposeInMainWorld('lab', {
   startTrain:     (params) => ipcRenderer.invoke('start-train',     params),
   startTest:      (params) => ipcRenderer.invoke('start-test',      params),
   stopExperiment: ()       => ipcRenderer.invoke('stop-experiment'),
+  stopSniffing:   ()       => ipcRenderer.invoke('stop-sniffing'),
   loadModelInfo:  ()       => ipcRenderer.invoke('load-model-info'),
+  exportModel:    (opts)   => ipcRenderer.invoke('export-model', opts),
+  importModel:    ()       => ipcRenderer.invoke('import-model'),
   // ── Events ────────────────────────────────────────────────────────────────
   onLog:          (cb) => ipcRenderer.on('log',                (_e, d) => cb(d)),
   onStatus:       (cb) => ipcRenderer.on('status',             (_e, d) => cb(d)),

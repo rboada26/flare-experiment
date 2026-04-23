@@ -1,18 +1,21 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
 const { spawn, execSync } = require('child_process');
 
-const PARTNER_DIR      = path.join(__dirname, '..');
-const CAPTURES_DIR     = path.join(PARTNER_DIR, 'captures');
-const MODEL_DIR        = path.join(PARTNER_DIR, 'model');
+const PARTNER_DIR        = path.join(__dirname, '..');
+const CAPTURES_DIR       = path.join(PARTNER_DIR, 'captures');
+const MODEL_DIR          = path.join(PARTNER_DIR, 'model');
+const SAVED_MODELS_DIR   = path.join(PARTNER_DIR, 'saved_models');
+const PCAP_STATS_PY      = path.join(__dirname, 'pcap_stats.py');
 
 let mainWindow        = null;
 let activeProc        = null;
 let capturePoller     = null;
 let experimentStopped = false;
+let sniffingDecision  = false;  // attacker chose to stop early and predict now
 
 // ── Round tracking ────────────────────────────────────────────────────────────
 let currentSession    = 0;
@@ -45,12 +48,14 @@ app.on('before-quit',       () => { cleanupAndQuit(); });
 function cleanupAndQuit() {
   stopCapPoller();
   if (activeProc) { try { activeProc.kill('SIGTERM'); } catch (_) {} activeProc = null; }
-  try {
-    const caps = execSync("docker ps --filter 'name=cap_' --format '{{.Names}}'",
-      { cwd: PARTNER_DIR, timeout: 5000 }).toString().trim();
-    if (caps) execSync(`docker stop ${caps.split('\n').join(' ')}`,
-      { stdio: 'ignore', timeout: 10000 });
-  } catch (_) {}
+  for (const prefix of ['cap_']) {
+    try {
+      const names = execSync(`docker ps -a --filter 'name=${prefix}' --format '{{.Names}}'`,
+        { cwd: PARTNER_DIR, timeout: 5000 }).toString().trim();
+      if (names) execSync(`docker stop ${names.split('\n').join(' ')}`,
+        { stdio: 'ignore', timeout: 10000 });
+    } catch (_) {}
+  }
   try { execSync('docker compose down --remove-orphans',
     { cwd: PARTNER_DIR, stdio: 'ignore', timeout: 15000 }); } catch (_) {}
 }
@@ -63,6 +68,9 @@ function log(msg)     { send('log', msg); console.log('[main]', msg); }
 function setStatus(s) { send('status', s); }
 
 // ── Capture poller ────────────────────────────────────────────────────────────
+let _boxCache     = {};
+let _lastBoxTime  = 0;
+
 function startCapPoller() {
   capturePoller = setInterval(() => {
     if (!fs.existsSync(CAPTURES_DIR)) return;
@@ -75,7 +83,30 @@ function startCapPoller() {
       const m = f.match(/session\d+_([a-z]+)_/);
       return { name: f, arch: m ? m[1] : 'unknown', size };
     });
-    send('capture-stats', stats);
+
+    // Throttle: recompute packet-size box stats at most every 8 s
+    const now = Date.now();
+    if (now - _lastBoxTime > 8000) {
+      _lastBoxTime = now;
+      const archBest = {};
+      stats.forEach(({ arch, name, size }) => {
+        if (!archBest[arch] || size > archBest[arch].size) archBest[arch] = { name, size };
+      });
+      Object.entries(archBest).forEach(([arch, { name }]) => {
+        try {
+          const out = execSync(
+            `python3 "${PCAP_STATS_PY}" "${path.join(CAPTURES_DIR, name)}"`,
+            { timeout: 3000 }
+          ).toString().trim();
+          if (out) {
+            const [min, q1, median, q3, max, mean, count] = out.split(' ').map(Number);
+            _boxCache[arch] = { min, q1, median, q3, max, mean, count };
+          }
+        } catch (_) {}
+      });
+    }
+
+    send('capture-stats', stats.map(s => ({ ...s, boxStats: _boxCache[s.arch] || null })));
   }, 2000);
 }
 function stopCapPoller() {
@@ -102,7 +133,7 @@ function spawnLogged(cmd, args, onLine = null) {
     });
     proc.on('close', code => {
       activeProc = null;
-      (code === 0 || experimentStopped) ? resolve(code) : reject(new Error(`${cmd} exited with code ${code}`));
+      (code === 0 || experimentStopped || sniffingDecision) ? resolve(code) : reject(new Error(`${cmd} exited with code ${code}`));
     });
     proc.on('error', err => { activeProc = null; reject(err); });
   });
@@ -204,17 +235,20 @@ function stopRoundPoller() {
 }
 
 // ── Collect + extract (shared by train and test) ──────────────────────────────
-async function collectAndExtract(sessions, rounds, window, minPackets, minSize = 0, archs = null) {
+async function collectAndExtract(sessions, rounds, window, minPackets, minSize = 0, archs = null, mist = false, mistPFixed = 262144, mistRate = 10) {
   const monitorArchs = archs || ['simplecnn', 'resnet', 'mobilenet', 'gru', 'lstm', 'bilstm'];
   currentSession = 0;
   startCapPoller();
   startRoundPoller(monitorArchs);
 
   const archArgs = archs && archs.length < 6 ? ['--archs', archs.join(',')] : [];
+  // session_duration = rounds × 120 s so all archs pad to the same wire duration
+  const mistSessionDuration = String(rounds * 120);
+  const mistArgs = mist ? ['--mist', '--mist-p-fixed', String(mistPFixed), '--mist-rate', String(mistRate), '--mist-session-duration', mistSessionDuration] : [];
   let collectOk = true;
   try {
     await spawnLogged('bash',
-      ['collect_data.sh', '--sessions', String(sessions), '--rounds', String(rounds), ...archArgs],
+      ['collect_data.sh', '--sessions', String(sessions), '--rounds', String(rounds), ...archArgs, ...mistArgs],
       line => {
         const sm = line.match(/Starting session\s+(\d+)/);
         if (sm) {
@@ -231,8 +265,8 @@ async function collectAndExtract(sessions, rounds, window, minPackets, minSize =
         if (dm) send('session-done', parseInt(dm[1], 10));
       });
   } catch (err) {
-    collectOk = false;
-    if (!experimentStopped) log(`  collect_data.sh error: ${err.message}`);
+    collectOk = sniffingDecision; // attacker chose to decide now — treat as success
+    if (!collectOk && !experimentStopped) log(`  collect_data.sh error: ${err.message}`);
   }
   stopRoundPoller();
   stopCapPoller();
@@ -247,6 +281,23 @@ async function collectAndExtract(sessions, rounds, window, minPackets, minSize =
   }
   return !experimentStopped;
 }
+
+// ── IPC: stop-sniffing ────────────────────────────────────────────────────────
+ipcMain.handle('stop-sniffing', async () => {
+  sniffingDecision = true;
+  log('[attacker] Sniffing stopped — classifying captured traffic...');
+  // Stop all running tcpdump containers
+  try {
+    const names = execSync(`docker ps --filter 'name=cap_' --format '{{.Names}}'`,
+      { cwd: PARTNER_DIR, timeout: 5000 }).toString().trim();
+    if (names) execSync(`docker stop ${names.split('\n').join(' ')}`,
+      { stdio: 'ignore', timeout: 10000 });
+  } catch (_) {}
+  // Kill collect_data.sh — spawnLogged will resolve (not reject) because sniffingDecision=true
+  if (activeProc) { try { activeProc.kill('SIGTERM'); } catch (_) {} }
+  // Tear down FL containers in background so they don't interfere with feature extraction
+  setTimeout(() => composeDown(), 2000);
+});
 
 // ── IPC: stop-experiment ──────────────────────────────────────────────────────
 ipcMain.handle('stop-experiment', async () => {
@@ -333,8 +384,11 @@ ipcMain.handle('start-train', async (_e, params) => {
 
 // ── IPC: start-test ───────────────────────────────────────────────────────────
 ipcMain.handle('start-test', async (_e, params) => {
-  const { rounds = 5, archs } = params;
+  // rounds is hardcoded to 5 — attacker has no say in how many rounds the victim runs
+  const rounds = 5;
+  const { archs, mist = false, mistPFixed = 262144, mistRate = 10 } = params;
   experimentStopped = false;
+  sniffingDecision  = false;
   experimentPhase   = 'test';
 
   const modelInfo = readModelInfo();
@@ -353,8 +407,41 @@ ipcMain.handle('start-test', async (_e, params) => {
   log(`║  Window     : ${String(window + 's  (locked — from training)').padEnd(42)}║`);
   log(`║  Min Packets: ${String(minPackets + '  (locked — from training)').padEnd(42)}║`);
   log(`║  Min PktSize: ${String(minSize > 0 ? minSize + ' bytes (locked — from training)' : 'none').padEnd(42)}║`);
+  if (mist) {
+    const kb = Math.round(mistPFixed / 1024);
+    log(`║  MIST       : ${String(`ENABLED  P_fixed=${kb}KB  R=${mistRate}pps`).padEnd(42)}║`);
+  } else {
+    log(`║  MIST       : ${String('off').padEnd(42)}║`);
+  }
   log('╚══════════════════════════════════════════════════════════╝');
   setStatus('running');
+
+  // ── MIST disk-safety check ────────────────────────────────────────────────
+  if (mist) {
+    try {
+      const dfOut  = execSync(`df -k "${CAPTURES_DIR}"`, { timeout: 5000 }).toString();
+      const lines  = dfOut.trim().split('\n');
+      const header = lines[0].trim().split(/\s+/);
+      const data   = lines[lines.length - 1].trim().split(/\s+/);
+      const availIdx = header.findIndex(h => h.toLowerCase() === 'available');
+      const availKB  = parseInt(data[availIdx >= 0 ? availIdx : 3], 10);
+      const availGB  = availKB / (1024 * 1024);
+      const numArchs = archs ? archs.length : 6;
+      // Estimate: P_fixed × R × 2 directions × N archs × 600s (10-min session)
+      const estimatedGB = (mistPFixed * mistRate * 2 * numArchs * 600) / (1024 ** 3);
+      log(`\n[MIST] Disk available : ${availGB.toFixed(1)} GB`);
+      log(`[MIST] Estimated PCAP : ~${estimatedGB.toFixed(1)} GB  (10-min / ${numArchs}-arch session)`);
+      if (estimatedGB > availGB * 0.80) {
+        log(`[MIST] ABORT: ~${estimatedGB.toFixed(1)} GB would consume ${Math.round(estimatedGB / availGB * 100)}% of free disk.`);
+        log('[MIST]        Lower P_fixed or Rate, then try again.');
+        setStatus('error');
+        return;
+      }
+      log(`[MIST] Disk check passed — proceeding.\n`);
+    } catch (_) {
+      log('[MIST] Warning: could not read disk stats — proceeding anyway.');
+    }
+  }
 
   // Clean test artifacts only — keep model/
   log('\n[1/3] Cleaning test artifacts...');
@@ -367,7 +454,7 @@ ipcMain.handle('start-test', async (_e, params) => {
   composeDown();
   if (experimentStopped) { setStatus('stopped'); return; }
 
-  const ok = await collectAndExtract(1, rounds, window, minPackets, minSize);
+  const ok = await collectAndExtract(1, rounds, window, minPackets, minSize, null, mist, mistPFixed, mistRate);
   if (!ok) { composeDown(); setStatus(experimentStopped ? 'stopped' : 'error'); return; }
 
   log('\n[3/3] Running predict.py...');
@@ -393,4 +480,84 @@ ipcMain.handle('start-test', async (_e, params) => {
   log('║              Test phase complete.                        ║');
   log('╚══════════════════════════════════════════════════════════╝');
   setStatus('done');
+});
+
+// ── IPC: export-model ─────────────────────────────────────────────────────────
+// opts.name  → save directly to saved_models/flare_model_<name>.bin  (no dialog)
+// opts absent → show native save dialog (manual export from Test panel)
+ipcMain.handle('export-model', async (_e, opts = {}) => {
+  if (!fs.existsSync(path.join(MODEL_DIR, 'model.pkl'))) {
+    return { ok: false, error: 'No trained model found. Run Train first.' };
+  }
+  fs.mkdirSync(SAVED_MODELS_DIR, { recursive: true });
+
+  let outPath;
+  if (opts.name) {
+    const safe = opts.name.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 80) || 'unnamed';
+    outPath = path.join(SAVED_MODELS_DIR, `flare_model_${safe}.bin`);
+  } else {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export FLARE Model',
+      defaultPath: path.join(SAVED_MODELS_DIR, `flare_model_${ts}.bin`),
+      filters: [{ name: 'FLARE Model', extensions: ['bin'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    outPath = result.filePath;
+  }
+
+  try {
+    const out = execSync(`python3 export_model.py "${outPath}"`,
+      { cwd: PARTNER_DIR, timeout: 30000 }).toString().trim();
+    const rel = path.relative(PARTNER_DIR, outPath);
+    return { ok: true, filePath: outPath, relPath: rel, output: out };
+  } catch (e) {
+    return { ok: false, error: e.stderr?.toString() || e.message };
+  }
+});
+
+// ── IPC: import-model ─────────────────────────────────────────────────────────
+ipcMain.handle('import-model', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import FLARE Model',
+    filters: [{ name: 'FLARE Model', extensions: ['bin'] }],
+    properties: ['openFile'],
+  });
+  if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+
+  let buf;
+  try { buf = fs.readFileSync(result.filePaths[0]); }
+  catch (e) { return { ok: false, error: `Cannot read file: ${e.message}` }; }
+
+  // Validate magic bytes
+  if (buf.length < 12 || buf.slice(0, 8).toString('ascii') !== 'FLAREMDL')
+    return { ok: false, error: 'Not a valid FLARE model file (bad magic bytes).' };
+
+  const headerLen = buf.readUInt32BE(8);
+  if (buf.length < 12 + headerLen)
+    return { ok: false, error: 'File appears truncated.' };
+
+  let header;
+  try { header = JSON.parse(buf.slice(12, 12 + headerLen).toString('utf-8')); }
+  catch (e) { return { ok: false, error: 'Corrupt header JSON.' }; }
+
+  const pklBytes = buf.slice(12 + headerLen);
+  if (pklBytes.length === 0) return { ok: false, error: 'No model data in file.' };
+
+  try {
+    fs.mkdirSync(MODEL_DIR, { recursive: true });
+    fs.writeFileSync(path.join(MODEL_DIR, 'model.pkl'), pklBytes);
+    fs.writeFileSync(path.join(MODEL_DIR, 'config.json'), JSON.stringify({
+      trainedAt:  header.trained_at,
+      window:     header.window,
+      minPackets: header.min_packets,
+      minSize:    header.min_size  || 0,
+      sessions:   header.sessions,
+      rounds:     header.rounds,
+      trees:      header.trees,
+    }, null, 2));
+  } catch (e) {
+    return { ok: false, error: `Failed to write model: ${e.message}` };
+  }
+  return { ok: true, header };
 });
